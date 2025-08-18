@@ -45,16 +45,13 @@ fi
 
 echo "📦 检查依赖包..."
 
-# 检查 node_modules 是否存在，如果不存在则安装依赖
-if [ ! -d "node_modules" ]; then
-    echo "📥 安装依赖包..."
-    pnpm install
-    echo "✅ 依赖包安装完成"
-else
-    echo "✅ 依赖包已存在"
-fi
+# 强制重新安装依赖（解决 Rollup 架构兼容性问题）
+echo "📥 重新安装依赖包..."
+rm -rf node_modules pnpm-lock.yaml
+pnpm install
+echo "✅ 依赖包安装完成"
 
-# 检查后端服务是否就绪
+# 检查后端服务是否就绪（可选）
 echo "⏳ 检查后端服务状态..."
 if [ -n "$VITE_APP_API_URL" ]; then
     # 提取主机地址
@@ -67,19 +64,10 @@ if [ -n "$VITE_APP_API_URL" ]; then
     
     echo "🔍 检查后端服务: $API_HOST:$API_PORT"
     
-    # 等待后端服务就绪（最多等待60秒）
-    timeout=60
-    while [ $timeout -gt 0 ]; do
-        if nc -z $API_HOST $API_PORT 2>/dev/null; then
-            echo "✅ 后端服务已就绪"
-            break
-        fi
-        echo "   后端服务未就绪，等待 2 秒... (剩余 $timeout 秒)"
-        sleep 2
-        timeout=$((timeout - 2))
-    done
-    
-    if [ $timeout -le 0 ]; then
+    # 简单检查后端服务（不等待）
+    if nc -z $API_HOST $API_PORT 2>/dev/null; then
+        echo "✅ 后端服务已就绪"
+    else
         echo "⚠️  警告: 后端服务未就绪，但继续启动前端服务"
     fi
 fi
@@ -90,5 +78,5 @@ echo "📊 服务端口: 2888"
 echo "🌐 访问地址: http://localhost:2888"
 echo "=========================================="
 
-# 使用 pnpm 启动开发服务器
-exec pnpm run dev --host 0.0.0.0 --port 2888
+# 使用 pnpm 启动开发服务器（禁用自动打开浏览器）
+exec pnpm run dev --host 0.0.0.0 --port 2888 --no-open

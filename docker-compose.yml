@@ -66,7 +66,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-mineadmin123}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis123}
+      - REDIS_AUTH=${REDIS_PASSWORD:-redis123}
       - REDIS_DB=0
     ports:
       - "9501:9501"
@@ -107,8 +107,6 @@ services:
     ports:
       - "2888:2888"
     volumes:
-      - web_source:/app
-      - web_node_modules:/app/node_modules
       - web_temp:/tmp
       - web_logs:/logs
     healthcheck:

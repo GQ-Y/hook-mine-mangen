@@ -82,5 +82,5 @@ echo "🚀 启动 MineAdmin 服务..."
 echo "📊 服务端口: 9501 (HTTP), 9502 (WebSocket), 9509 (Notification)"
 echo "=========================================="
 
-# 使用 swoole-cli 启动服务
-exec swoole-cli bin/hyperf.php start
+# 使用 swoole-cli 启动服务，禁用短函数名
+exec swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php start
