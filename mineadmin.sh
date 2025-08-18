@@ -13,6 +13,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
+MAGENTA='\033[0;35m'
+PURPLE='\033[0;35m'
 NC='\033[0m'
 
 # 全局变量
@@ -61,42 +63,40 @@ show_main_menu() {
     clear
     print_title
     echo ""
-    echo -e "${WHITE}请选择操作:${NC}"
+    echo -e "${WHITE}命令面板:${NC}"
     echo ""
-    echo -e "${BLUE}🚀 部署管理${NC}"
-    echo "  1) 系统兼容性检测"
-    echo "  2) 一键安装部署"
-    echo "  3) 选择Web模式 (开发/生产)"
-    echo ""
-    echo -e "${BLUE}⚙️  服务管理${NC}"
-    echo "  4) 启动所有服务"
-    echo "  5) 停止所有服务"
-    echo "  6) 重启所有服务"
-    echo "  7) 查看服务状态"
-    echo ""
-    echo -e "${BLUE}📊 监控管理${NC}"
-    echo "  8) 查看容器日志"
-    echo "  9) 查看系统资源"
-    echo "  10) 查看网络连接"
-    echo ""
-    echo -e "${BLUE}🔧 配置管理${NC}"
-    echo "  11) 重新生成配置"
-    echo "  12) 修改密码"
-    echo "  13) 查看配置信息"
-    echo ""
-    echo -e "${BLUE}🧹 清理维护${NC}"
-    echo "  14) 清理Docker缓存"
-    echo "  15) 完全卸载"
-    echo ""
-    echo -e "${BLUE}🔗 全局命令${NC}"
-    echo "  16) 安装全局命令"
-    echo "  17) 卸载全局命令"
-    echo "  18) 检查命令状态"
-    echo ""
-    echo -e "${BLUE}📖 帮助信息${NC}"
-    echo "  19) 查看帮助"
-    echo "  0) 退出"
-    echo ""
+    
+    # 定义菜单项
+    local menu_items=(
+        "部署管理" "1) 系统兼容性检测 (hook check)" "2) 一键安装部署 (hook install)" "3) 选择Web模式 (hook web)"
+        "服务管理" "4) 启动所有服务 (hook start)" "5) 停止所有服务 (hook stop)" "6) 重启所有服务 (hook restart)"
+        "监控管理" "7) 查看服务状态 (hook status)" "8) 查看容器日志 (hook logs)" "9) 查看系统资源 (hook resources)"
+        "配置管理" "10) 查看网络连接 (hook network)" "11) 重新生成配置 (hook config)" "12) 修改密码 (hook password)"
+        "清理维护" "13) 查看配置信息 (hook info)" "14) 查看已安装插件 (hook plugins)" "15) 清理Docker缓存 (hook clean)"
+        "全局命令" "16) 完全卸载 (hook uninstall)" "17) 安装全局命令 (hook setup)" "18) 卸载全局命令 (hook remove)"
+        "帮助信息" "19) 检查命令状态 (hook test)" "20) 查看帮助 (hook help)" "0) 退出 (exit)"
+    )
+    
+    # 计算每列宽度
+    local col_width=45
+    
+    # 打印菜单项
+    for ((i=0; i<${#menu_items[@]}; i+=4)); do
+        local section="${menu_items[$i]}"
+        local item1="${menu_items[$i+1]}"
+        local item2="${menu_items[$i+2]}"
+        local item3="${menu_items[$i+3]}"
+        
+        # 打印分组标题
+        echo -e "${MAGENTA}${section}${NC}"
+        
+        # 打印菜单项（三列，左对齐）
+        printf "  ${GREEN}%-${col_width}s${NC}" "$item1"
+        printf "${GREEN}%-${col_width}s${NC}" "$item2"
+        printf "${GREEN}%-${col_width}s${NC}\n" "$item3"
+        
+        echo ""
+    done8
 }
 
 # 系统兼容性检测
@@ -334,10 +334,22 @@ EOF
         echo "MySQL Root密码: $mysql_root_password"
         echo "MySQL 用户密码: $mysql_password"
         echo "Redis 密码: $redis_password"
+        echo ""
+        echo -e "${WHITE}📡 监听端口:${NC}"
+        echo "9501 - 后端API服务"
+        echo "9502 - WebSocket服务"
+        echo "9509 - 通知服务"
+        echo "2888 - 前端开发服务"
+        echo "80   - 前端生产服务"
+        echo "3306 - MySQL数据库"
+        echo "6379 - Redis缓存"
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         
         # 安装全局命令
         install_global_command
+        
+        # 询问是否安装插件
+        ask_install_plugins
     else
         print_error "服务启动失败，请检查日志"
         docker-compose -f docker/docker-compose.yml logs
@@ -460,7 +472,14 @@ show_network_connections() {
     echo -e "${WHITE}网络连接情况:${NC}"
     echo ""
     echo -e "${BLUE}监听端口:${NC}"
-    netstat -tlnp
+    # 检测系统类型，使用不同的netstat参数
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        netstat -an | grep LISTEN
+    else
+        # Linux
+        netstat -tlnp
+    fi
     echo ""
     echo -e "${BLUE}Docker网络:${NC}"
     docker network ls
@@ -544,6 +563,30 @@ show_config_info() {
     echo ""
     echo -e "${BLUE}前端生产配置 (.env.production):${NC}"
     cat "$PROJECT_ROOT/web/.env.production"
+}
+
+# 查看已安装插件
+show_installed_plugins() {
+    echo -e "${WHITE}已安装的插件:${NC}"
+    echo ""
+    
+    cd "$PROJECT_ROOT"
+    
+    # 检查容器是否运行
+    if ! docker-compose -f docker/docker-compose.yml ps | grep -q "server-app.*Up"; then
+        print_error "后端服务未运行，无法查看插件"
+        return 1
+    fi
+    
+    print_info "正在获取已安装插件列表..."
+    
+    # 执行命令获取已安装插件
+    docker-compose -f docker/docker-compose.yml exec -T server-app swoole-cli bin/hyperf.php mine-extension:list 2>/dev/null || {
+        print_warning "无法获取插件列表，可能没有安装插件或命令不存在"
+        echo ""
+        echo -e "${WHITE}手动查看插件目录:${NC}"
+        docker-compose -f docker/docker-compose.yml exec -T server-app ls -la /app/plugin/ 2>/dev/null || echo "插件目录不存在"
+    }
 }
 
 # 清理Docker缓存
@@ -778,6 +821,71 @@ check_command_status() {
     fi
 }
 
+# 询问是否安装插件
+ask_install_plugins() {
+    echo ""
+    echo -e "${WHITE}🔌 插件安装${NC}"
+    echo "系统初始化完毕，swoole-cli 已全局可用"
+    echo ""
+    
+    # 获取可用插件列表
+    print_info "正在获取可用插件列表..."
+    
+    # 这里可以添加获取插件列表的逻辑
+    # 暂时使用示例插件
+    local available_plugins=(
+        "jileapp/cms - CMS内容管理插件"
+        "jileapp/shop - 商城插件"
+        "jileapp/blog - 博客插件"
+    )
+    
+    echo -e "${WHITE}可用插件:${NC}"
+    for i in "${!available_plugins[@]}"; do
+        echo "  $((i+1))) ${available_plugins[$i]}"
+    done
+    echo "  0) 跳过插件安装"
+    echo ""
+    
+    read -p "请选择要安装的插件 (0-${#available_plugins[@]}): " plugin_choice
+    
+    if [[ "$plugin_choice" == "0" ]]; then
+        print_info "跳过插件安装"
+        return
+    fi
+    
+    if [[ "$plugin_choice" -ge 1 && "$plugin_choice" -le ${#available_plugins[@]} ]]; then
+        local selected_plugin="${available_plugins[$((plugin_choice-1))]}"
+        local plugin_name=$(echo "$selected_plugin" | cut -d' ' -f1)
+        
+        echo ""
+        echo -e "${WHITE}选择的插件:${NC} $selected_plugin"
+        echo ""
+        echo -e "${YELLOW}插件安装命令:${NC}"
+        echo "swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php mine-extension:install $plugin_name -y"
+        echo ""
+        
+        read -p "确认安装此插件吗？(y/N): " confirm_install
+        
+        if [[ "$confirm_install" == "y" || "$confirm_install" == "Y" ]]; then
+            print_info "正在安装插件: $plugin_name"
+            
+            # 进入容器执行插件安装命令
+            cd "$PROJECT_ROOT"
+            docker-compose -f docker/docker-compose.yml exec -T server-app swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php mine-extension:install "$plugin_name" -y
+            
+            if [ $? -eq 0 ]; then
+                print_success "插件安装成功: $plugin_name"
+            else
+                print_error "插件安装失败: $plugin_name"
+            fi
+        else
+            print_info "取消插件安装"
+        fi
+    else
+        print_error "无效选择"
+    fi
+}
+
 # 显示帮助信息
 show_help() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -785,23 +893,33 @@ show_help() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     echo -e "${BLUE}🚀 快速开始:${NC}"
-    echo "1. 运行系统兼容性检测"
-    echo "2. 执行一键安装部署"
-    echo "3. 选择Web模式 (开发/生产)"
+    echo "1. 运行系统兼容性检测: hook check"
+    echo "2. 执行一键安装部署: hook install"
+    echo "3. 选择Web模式: hook web"
     echo ""
     echo -e "${BLUE}⚙️  服务管理:${NC}"
-    echo "- 启动/停止/重启所有服务"
-    echo "- 查看服务状态和资源使用"
-    echo "- 查看容器日志"
+    echo "- 启动所有服务: hook start"
+    echo "- 停止所有服务: hook stop"
+    echo "- 重启所有服务: hook restart"
+    echo "- 查看服务状态: hook status"
+    echo "- 查看容器日志: hook logs"
+    echo "- 查看系统资源: hook resources"
     echo ""
     echo -e "${BLUE}🔧 配置管理:${NC}"
-    echo "- 重新生成配置文件"
-    echo "- 修改数据库密码"
-    echo "- 查看当前配置"
+    echo "- 重新生成配置: hook config"
+    echo "- 修改密码: hook password"
+    echo "- 查看配置信息: hook info"
+    echo "- 查看已安装插件: hook plugins"
+    echo "- 查看网络连接: hook network"
+    echo ""
+    echo -e "${BLUE}🧹 清理维护:${NC}"
+    echo "- 清理Docker缓存: hook clean"
+    echo "- 完全卸载: hook uninstall"
     echo ""
     echo -e "${BLUE}🔗 全局命令:${NC}"
-    echo "- 安装后可在任何目录使用 'hook' 命令"
-    echo "- 支持Bash和Zsh"
+    echo "- 安装全局命令: hook setup"
+    echo "- 卸载全局命令: hook remove"
+    echo "- 检查命令状态: hook test"
     echo ""
     echo -e "${BLUE}📋 系统要求:${NC}"
     echo "- Ubuntu 24.04 LTS (推荐)"
@@ -814,7 +932,84 @@ show_help() {
     echo "- 前端开发: http://服务器IP:2888"
     echo "- 前端生产: http://服务器IP:80"
     echo ""
+    echo -e "${BLUE}💡 使用提示:${NC}"
+    echo "- 直接使用 'hook' 命令进入交互式菜单"
+    echo "- 使用 'hook <命令>' 直接执行对应功能"
+    echo "- 使用 'hook help' 查看此帮助信息"
+    echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+# 处理hook命令
+handle_hook_command() {
+    local command=$1
+    
+    case $command in
+        check)
+            check_system_compatibility
+            ;;
+        install)
+            install_mineadmin
+            ;;
+        web)
+            select_web_mode
+            ;;
+        start)
+            start_services
+            ;;
+        stop)
+            stop_services
+            ;;
+        restart)
+            restart_services
+            ;;
+        status)
+            show_service_status
+            ;;
+        logs)
+            show_container_logs
+            ;;
+        resources)
+            show_system_resources
+            ;;
+        network)
+            show_network_connections
+            ;;
+        config)
+            regenerate_config
+            ;;
+        password)
+            change_passwords
+            ;;
+        info)
+            show_config_info
+            ;;
+        plugins)
+            show_installed_plugins
+            ;;
+        clean)
+            clean_docker_cache
+            ;;
+        uninstall)
+            uninstall_mineadmin
+            ;;
+        setup)
+            install_global_command
+            ;;
+        remove)
+            uninstall_global_command
+            ;;
+        test)
+            check_command_status
+            ;;
+        help)
+            show_help
+            ;;
+        *)
+            print_error "未知命令: $command"
+            echo "使用 'hook help' 查看可用命令"
+            ;;
+    esac
 }
 
 # 主函数
@@ -831,10 +1026,16 @@ main() {
         exit 1
     fi
     
+    # 如果提供了参数，直接执行对应的hook命令
+    if [ $# -gt 0 ]; then
+        handle_hook_command "$1"
+        exit 0
+    fi
+    
     # 主循环
     while true; do
         show_main_menu
-        read -p "请输入选择 (0-19): " choice
+        read -p "请输入选择 (0-20): " choice
         
         case $choice in
             0)
@@ -881,21 +1082,24 @@ main() {
                 show_config_info
                 ;;
             14)
-                clean_docker_cache
+                show_installed_plugins
                 ;;
             15)
-                uninstall_mineadmin
+                clean_docker_cache
                 ;;
             16)
-                install_global_command
+                uninstall_mineadmin
                 ;;
             17)
-                uninstall_global_command
+                install_global_command
                 ;;
             18)
-                check_command_status
+                uninstall_global_command
                 ;;
             19)
+                check_command_status
+                ;;
+            20)
                 show_help
                 ;;
             *)

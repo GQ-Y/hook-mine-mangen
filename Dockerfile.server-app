@@ -8,7 +8,6 @@ FROM ubuntu:24.04 AS builder
 # 设置环境变量
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
-ENV PHP_VERSION=8.1
 ENV COMPOSER_VERSION=2.6.5
 
 # 更新系统并安装基础依赖
@@ -17,54 +16,12 @@ RUN apt-get update && apt-get install -y \
     wget \
     git \
     unzip \
-    software-properties-common \
-    apt-transport-https \
     ca-certificates \
-    gnupg \
-    lsb-release \
-    && rm -rf /var/lib/apt/lists/*
-
-# 添加 PHP 官方仓库
-RUN wget -qO - https://packages.sury.org/php/apt.gpg | apt-key add - \
-    && echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
-
-# 安装 PHP 8.1 及相关扩展
-RUN apt-get update && apt-get install -y \
-    php${PHP_VERSION} \
-    php${PHP_VERSION}-cli \
-    php${PHP_VERSION}-fpm \
-    php${PHP_VERSION}-mysql \
-    php${PHP_VERSION}-pgsql \
-    php${PHP_VERSION}-sqlite3 \
-    php${PHP_VERSION}-redis \
-    php${PHP_VERSION}-memcached \
-    php${PHP_VERSION}-curl \
-    php${PHP_VERSION}-gd \
-    php${PHP_VERSION}-mbstring \
-    php${PHP_VERSION}-xml \
-    php${PHP_VERSION}-zip \
-    php${PHP_VERSION}-bcmath \
-    php${PHP_VERSION}-intl \
-    php${PHP_VERSION}-soap \
-    php${PHP_VERSION}-opcache \
-    php${PHP_VERSION}-swoole \
-    php${PHP_VERSION}-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer --version=${COMPOSER_VERSION}
-
-# 安装 Swoole
-RUN pecl install swoole \
-    && echo "extension=swoole.so" > /etc/php/${PHP_VERSION}/mods-available/swoole.ini \
-    && phpenmod swoole
-
-# 配置 PHP
-RUN echo "memory_limit = 1G" >> /etc/php/${PHP_VERSION}/cli/php.ini \
-    && echo "upload_max_filesize = 128M" >> /etc/php/${PHP_VERSION}/cli/php.ini \
-    && echo "post_max_size = 128M" >> /etc/php/${PHP_VERSION}/cli/php.ini \
-    && echo "max_execution_time = 300" >> /etc/php/${PHP_VERSION}/cli/php.ini \
-    && echo "date.timezone = ${TZ}" >> /etc/php/${PHP_VERSION}/cli/php.ini
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer --version=${COMPOSER_VERSION} || \
+    (wget -O /usr/local/bin/composer https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar && chmod +x /usr/local/bin/composer)
 
 # 第二阶段：运行阶段
 FROM ubuntu:24.04
@@ -76,19 +33,14 @@ ARG TARGETOS
 # 设置环境变量
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
-ENV PHP_VERSION=8.1
 ENV APP_ENV=production
 ENV APP_DEBUG=false
 
 # 创建应用目录
 WORKDIR /app
 
-# 从构建阶段复制 PHP 和 Composer
-COPY --from=builder /usr/bin/php /usr/bin/php
+# 从构建阶段复制 Composer
 COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
-COPY --from=builder /etc/php /etc/php
-COPY --from=builder /usr/lib/php /usr/lib/php
-COPY --from=builder /usr/share/php /usr/share/php
 
 # 安装运行时依赖
 RUN apt-get update && apt-get install -y \
