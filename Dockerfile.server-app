@@ -63,15 +63,6 @@ RUN mkdir -p /runtime/container/proxy \
     && chmod -R 777 /logs \
     && chmod -R 777 /tmp
 
-# 复制应用代码
-COPY server-app/ /app/
-
-# 设置 Composer 镜像源
-RUN composer config -g repo.packagist composer https://mirrors.aliyun.com/composer/
-
-# 安装 PHP 依赖
-RUN composer install --no-dev --optimize-autoloader --no-interaction
-
 # 复制 swoole-cli 根据架构
 # 检测系统架构并复制相应的 swoole-cli
 RUN if [ "$TARGETARCH" = "amd64" ] || [ "$TARGETARCH" = "x86_64" ]; then \
@@ -93,6 +84,15 @@ RUN chmod +x /usr/local/bin/swoole-cli
 
 # 创建 swoole-cli 软链接到系统路径
 RUN ln -sf /usr/local/bin/swoole-cli /usr/bin/swoole-cli
+
+# 复制应用代码
+COPY server-app/ /app/
+
+# 设置 Composer 镜像源（使用 swoole-cli 运行）
+RUN swoole-cli /usr/local/bin/composer config -g repo.packagist composer https://mirrors.aliyun.com/composer/
+
+# 安装 PHP 依赖（使用 swoole-cli 运行）
+RUN swoole-cli /usr/local/bin/composer install --no-dev --optimize-autoloader --no-interaction
 
 # 复制启动脚本
 COPY docker/scripts/start-server.sh /app/start-server.sh

@@ -8,7 +8,7 @@ FROM ubuntu:24.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
 ENV NODE_VERSION=20
-ENV PNPM_VERSION=8.15.0
+ENV PNPM_VERSION=10.6.5
 
 # 更新系统并安装基础依赖
 RUN apt-get update && apt-get install -y \
@@ -39,6 +39,9 @@ COPY web/ /app/
 
 # 设置 pnpm 镜像源
 RUN pnpm config set registry https://registry.npmmirror.com/
+
+# 清理可能存在的 node_modules 和 lock 文件，解决 ARM64 架构下的依赖问题
+RUN rm -rf node_modules package-lock.json pnpm-lock.yaml
 
 # 安装依赖
 RUN pnpm install
