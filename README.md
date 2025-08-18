@@ -27,33 +27,98 @@
 
 ## 快速开始
 
-### 1. 准备环境
+### 方法一：使用统一管理工具（推荐）
+
+```bash
+# 进入项目根目录
+cd /path/to/your/project
+
+# 启动统一管理工具
+./docker/mineadmin.sh
+# 或者使用项目根目录的启动脚本
+./start.sh
+```
+
+统一管理工具提供以下功能：
+- 🔍 系统兼容性检测
+- 🚀 一键安装部署
+- ⚙️ 服务管理（启动/停止/重启）
+- 📊 状态监控和日志查看
+- 🔧 配置管理
+- 🧹 清理维护
+- 🔗 全局命令管理
+- 📖 帮助信息
+
+### 方法二：使用全局命令（安装后）
+
+安装完成后，系统会自动创建全局命令 `hook`，您可以在任何目录下使用：
+
+```bash
+# 在任何目录下启动管理工具
+hook
+```
+
+### 方法三：直接使用Docker Compose
+
 ```bash
 # 上传项目代码到服务器
 # 进入项目根目录
 cd /path/to/your/project
 
 # 给脚本执行权限
-chmod +x docker/install.sh
+chmod +x docker/*.sh
+
+# 使用统一管理工具进行安装
+./docker/mineadmin.sh
 ```
 
-### 2. 执行安装脚本
-```bash
-./docker/install.sh
-```
+### 系统兼容性
 
-### 3. 选择部署模式
-脚本会引导您选择：
-- 单机部署（推荐开发环境）
-- 主控节点部署
-- 工作节点部署
+本方案支持以下系统：
+- **Ubuntu 24.04 LTS** (推荐)
+- **架构支持**: x86_64 (Intel/AMD)、ARM64 (Apple Silicon/ARM) 和 macOS
+- **Shell支持**: Bash 和 Zsh
 
-### 4. 初始化配置
-脚本会自动：
-- 生成随机密码
-- 配置环境变量
-- 初始化数据库
-- 启动所有服务
+### 特殊功能
+
+- **swoole-cli 支持**: 自动检测系统架构并使用对应的 swoole-cli 库
+- **Root 权限**: 容器以 root 用户运行，避免权限问题
+- **根目录存储**: 使用根目录下的 `/storage`、`/runtime`、`/logs` 等目录，确保写入权限
+
+## 统一管理工具功能详解
+
+### 🚀 部署管理
+- **1) 系统兼容性检测**: 检测系统架构、内存、磁盘空间等
+- **2) 一键安装部署**: 首次使用，完整安装Docker和MineAdmin
+- **3) 选择Web模式**: 在开发模式和生产模式间切换
+
+### ⚙️ 服务管理
+- **4) 启动所有服务**: 启动所有MineAdmin服务
+- **5) 停止所有服务**: 停止所有MineAdmin服务
+- **6) 重启所有服务**: 重启所有MineAdmin服务
+- **7) 查看服务状态**: 显示所有容器状态和资源使用情况
+
+### 📊 监控管理
+- **8) 查看容器日志**: 查看各服务的详细日志
+- **9) 查看系统资源**: 显示CPU、内存、磁盘使用情况
+- **10) 查看网络连接**: 显示端口监听和网络连接状态
+
+### 🔧 配置管理
+- **11) 重新生成配置**: 重新生成随机密码和配置文件
+- **12) 修改密码**: 修改数据库、Redis或管理员密码
+- **13) 查看配置信息**: 显示当前配置文件内容
+
+### 🧹 清理维护
+- **14) 清理Docker缓存**: 清理Docker镜像和缓存
+- **15) 完全卸载**: 完全删除所有服务和数据
+
+### 🔗 全局命令
+- **16) 安装全局命令**: 安装 `hook` 全局命令
+- **17) 卸载全局命令**: 卸载 `hook` 全局命令
+- **18) 检查命令状态**: 检查全局命令安装状态
+
+### 📖 帮助信息
+- **19) 查看帮助**: 显示详细使用说明
 
 ## 服务端口说明
 - **Nginx**: 80 (生产模式前端)
@@ -66,32 +131,57 @@ chmod +x docker/install.sh
 
 ### 查看服务状态
 ```bash
-kubectl get pods -n mineadmin
-kubectl get services -n mineadmin
+# 使用统一管理工具
+./docker/mineadmin.sh
+# 选择选项 7) 查看服务状态
+
+# 或使用全局命令
+hook
+# 选择选项 7) 查看服务状态
 ```
 
 ### 查看日志
 ```bash
-# 查看后端服务日志
-kubectl logs -f deployment/server-app -n mineadmin
+# 使用统一管理工具
+./docker/mineadmin.sh
+# 选择选项 8) 查看容器日志
 
-# 查看前端服务日志
-kubectl logs -f deployment/web-dev -n mineadmin
+# 或使用全局命令
+hook
+# 选择选项 8) 查看容器日志
 ```
 
 ### 重启服务
 ```bash
-./docker/restart.sh
+# 使用统一管理工具
+./docker/mineadmin.sh
+# 选择选项 6) 重启所有服务
+
+# 或使用全局命令
+hook
+# 选择选项 6) 重启所有服务
 ```
 
 ### 停止服务
 ```bash
-./docker/stop.sh
+# 使用统一管理工具
+./docker/mineadmin.sh
+# 选择选项 5) 停止所有服务
+
+# 或使用全局命令
+hook
+# 选择选项 5) 停止所有服务
 ```
 
 ### 卸载服务
 ```bash
-./docker/uninstall.sh
+# 使用统一管理工具
+./docker/mineadmin.sh
+# 选择选项 15) 完全卸载
+
+# 或使用全局命令
+hook
+# 选择选项 15) 完全卸载
 ```
 
 ## 配置文件说明
@@ -118,11 +208,13 @@ kubectl logs -f deployment/web-dev -n mineadmin
 
 ### 日志查看
 ```bash
-# 查看所有Pod状态
-kubectl get pods -n mineadmin
+# 使用统一管理工具查看日志
+./docker/mineadmin.sh
+# 选择选项 8) 查看容器日志
 
-# 查看具体Pod日志
-kubectl logs <pod-name> -n mineadmin
+# 或使用全局命令
+hook
+# 选择选项 8) 查看容器日志
 ```
 
 ## 开发模式 vs 生产模式
@@ -145,5 +237,34 @@ kubectl logs <pod-name> -n mineadmin
 - 生产环境建议修改默认密码
 - 定期备份数据库数据
 
+## 文件结构
+```
+docker/
+├── README.md                 # 说明文档
+├── mineadmin.sh              # 统一管理脚本（主要入口）
+├── docker-compose.yml        # Docker Compose配置
+├── cli/                      # swoole-cli 库文件
+│   ├── x64/swoole-cli       # x86_64 架构
+│   ├── arm64/swoole-cli     # ARM64 架构
+│   └── macos/swoole-cli     # macOS 架构
+├── k8s/                      # Kubernetes配置文件
+│   ├── namespace.yaml        # 命名空间和配置映射
+│   ├── secrets.yaml          # 密钥配置
+│   ├── mysql.yaml           # MySQL服务配置
+│   ├── redis.yaml           # Redis服务配置
+│   ├── server-app.yaml      # 后端服务配置
+│   └── web.yaml             # 前端服务配置
+├── scripts/                  # 容器启动脚本
+│   ├── start-server.sh      # 后端启动脚本
+│   └── start-web-dev.sh     # 前端开发启动脚本
+├── nginx/                    # Nginx配置
+│   └── default.conf         # Nginx配置文件
+├── Dockerfile.server-app     # 后端Dockerfile
+├── Dockerfile.web-dev        # 前端开发Dockerfile
+└── Dockerfile.web-prod       # 前端生产Dockerfile
+```
+
 ## 更新日志
 - v1.0.0: 初始版本，支持基础部署功能
+- v1.1.0: 添加统一管理工具，提供完整的操作界面
+- v1.2.0: 支持多架构 swoole-cli，优化权限管理

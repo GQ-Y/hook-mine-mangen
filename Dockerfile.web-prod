@@ -1,0 +1,81 @@
+# MineAdmin 前端生产模式 Dockerfile
+# 基于 Ubuntu 24.04 系统构建
+
+# 第一阶段：构建阶段
+FROM ubuntu:24.04 AS builder
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+ENV NODE_VERSION=20
+ENV PNPM_VERSION=8.15.0
+
+# 更新系统并安装基础依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    unzip \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
+    && apt-get install -y nodejs
+
+# 安装 pnpm
+RUN npm install -g pnpm@${PNPM_VERSION}
+
+# 验证安装
+RUN node --version && npm --version && pnpm --version
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制前端源代码
+COPY server-app/web/ /app/
+
+# 设置 pnpm 镜像源
+RUN pnpm config set registry https://registry.npmmirror.com/
+
+# 安装依赖
+RUN pnpm install
+
+# 构建生产版本
+RUN pnpm run build
+
+# 第二阶段：运行阶段
+FROM nginx:alpine
+
+# 设置环境变量
+ENV TZ=Asia/Shanghai
+
+# 安装必要的工具
+RUN apk add --no-cache \
+    curl \
+    tzdata \
+    && cp /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && echo ${TZ} > /etc/timezone
+
+# 从构建阶段复制构建产物
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# 复制 Nginx 配置
+COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf
+
+# 创建必要的目录
+RUN mkdir -p /var/log/nginx \
+    && mkdir -p /var/cache/nginx
+
+# 暴露端口
+EXPOSE 80
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:80 || exit 1
+
+# 启动 Nginx
+CMD ["nginx", "-g", "daemon off;"]

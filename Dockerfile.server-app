@@ -1,0 +1,157 @@
+# MineAdmin 后端服务 Dockerfile
+# 基于 Ubuntu 24.04 系统构建
+# 支持 x86_64、ARM64 和 macOS 的 swoole-cli
+
+# 第一阶段：构建阶段
+FROM ubuntu:24.04 AS builder
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+ENV PHP_VERSION=8.1
+ENV COMPOSER_VERSION=2.6.5
+
+# 更新系统并安装基础依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    unzip \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# 添加 PHP 官方仓库
+RUN wget -qO - https://packages.sury.org/php/apt.gpg | apt-key add - \
+    && echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
+
+# 安装 PHP 8.1 及相关扩展
+RUN apt-get update && apt-get install -y \
+    php${PHP_VERSION} \
+    php${PHP_VERSION}-cli \
+    php${PHP_VERSION}-fpm \
+    php${PHP_VERSION}-mysql \
+    php${PHP_VERSION}-pgsql \
+    php${PHP_VERSION}-sqlite3 \
+    php${PHP_VERSION}-redis \
+    php${PHP_VERSION}-memcached \
+    php${PHP_VERSION}-curl \
+    php${PHP_VERSION}-gd \
+    php${PHP_VERSION}-mbstring \
+    php${PHP_VERSION}-xml \
+    php${PHP_VERSION}-zip \
+    php${PHP_VERSION}-bcmath \
+    php${PHP_VERSION}-intl \
+    php${PHP_VERSION}-soap \
+    php${PHP_VERSION}-opcache \
+    php${PHP_VERSION}-swoole \
+    php${PHP_VERSION}-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer --version=${COMPOSER_VERSION}
+
+# 安装 Swoole
+RUN pecl install swoole \
+    && echo "extension=swoole.so" > /etc/php/${PHP_VERSION}/mods-available/swoole.ini \
+    && phpenmod swoole
+
+# 配置 PHP
+RUN echo "memory_limit = 1G" >> /etc/php/${PHP_VERSION}/cli/php.ini \
+    && echo "upload_max_filesize = 128M" >> /etc/php/${PHP_VERSION}/cli/php.ini \
+    && echo "post_max_size = 128M" >> /etc/php/${PHP_VERSION}/cli/php.ini \
+    && echo "max_execution_time = 300" >> /etc/php/${PHP_VERSION}/cli/php.ini \
+    && echo "date.timezone = ${TZ}" >> /etc/php/${PHP_VERSION}/cli/php.ini
+
+# 第二阶段：运行阶段
+FROM ubuntu:24.04
+
+# 设置构建参数，支持多架构
+ARG TARGETARCH
+ARG TARGETOS
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+ENV PHP_VERSION=8.1
+ENV APP_ENV=production
+ENV APP_DEBUG=false
+
+# 创建应用目录
+WORKDIR /app
+
+# 从构建阶段复制 PHP 和 Composer
+COPY --from=builder /usr/bin/php /usr/bin/php
+COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
+COPY --from=builder /etc/php /etc/php
+COPY --from=builder /usr/lib/php /usr/lib/php
+COPY --from=builder /usr/share/php /usr/share/php
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    unzip \
+    netcat-openbsd \
+    supervisor \
+    nginx \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建必要的目录（在根目录下）
+RUN mkdir -p /runtime/container/proxy \
+    && mkdir -p /storage \
+    && mkdir -p /logs \
+    && mkdir -p /tmp \
+    && chmod -R 777 /runtime \
+    && chmod -R 777 /storage \
+    && chmod -R 777 /logs \
+    && chmod -R 777 /tmp
+
+# 复制应用代码
+COPY server-app/ /app/
+
+# 设置 Composer 镜像源
+RUN composer config -g repo.packagist composer https://mirrors.aliyun.com/composer/
+
+# 安装 PHP 依赖
+RUN composer install --no-dev --optimize-autoloader --no-interaction
+
+# 复制 swoole-cli 根据架构
+# 检测系统架构并复制相应的 swoole-cli
+RUN if [ "$TARGETARCH" = "amd64" ] || [ "$TARGETARCH" = "x86_64" ]; then \
+        echo "使用 x64 架构的 swoole-cli"; \
+        cp docker/cli/x64/swoole-cli /usr/local/bin/swoole-cli; \
+    elif [ "$TARGETARCH" = "arm64" ] || [ "$TARGETARCH" = "aarch64" ]; then \
+        echo "使用 ARM64 架构的 swoole-cli"; \
+        cp docker/cli/arm64/swoole-cli /usr/local/bin/swoole-cli; \
+    elif [ "$TARGETOS" = "darwin" ]; then \
+        echo "使用 macOS 架构的 swoole-cli"; \
+        cp docker/cli/macos/swoole-cli /usr/local/bin/swoole-cli; \
+    else \
+        echo "未知架构，使用 x64 架构的 swoole-cli"; \
+        cp docker/cli/x64/swoole-cli /usr/local/bin/swoole-cli; \
+    fi
+
+# 设置 swoole-cli 执行权限
+RUN chmod +x /usr/local/bin/swoole-cli
+
+# 创建 swoole-cli 软链接到系统路径
+RUN ln -sf /usr/local/bin/swoole-cli /usr/bin/swoole-cli
+
+# 复制启动脚本
+COPY docker/scripts/start-server.sh /app/start-server.sh
+RUN chmod +x /app/start-server.sh
+
+# 暴露端口
+EXPOSE 9501 9502 9509
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:9501/health || exit 1
+
+# 启动命令
+CMD ["/app/start-server.sh"]

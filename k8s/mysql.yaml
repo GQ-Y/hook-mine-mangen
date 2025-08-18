@@ -1,0 +1,165 @@
+# MySQL 持久化存储卷声明
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: mineadmin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-path
+---
+# MySQL 服务配置
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+  namespace: mineadmin
+  labels:
+    app: mysql
+    component: database
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3306
+      targetPort: 3306
+      protocol: TCP
+      name: mysql
+  selector:
+    app: mysql
+    component: database
+---
+# MySQL 部署配置
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: mineadmin
+  labels:
+    app: mysql
+    component: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+      component: database
+  template:
+    metadata:
+      labels:
+        app: mysql
+        component: database
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+              name: mysql
+          env:
+            # MySQL root密码
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mineadmin-secrets
+                  key: MYSQL_ROOT_PASSWORD
+            # 数据库名称
+            - name: MYSQL_DATABASE
+              value: "mineadmin"
+            # 数据库用户
+            - name: MYSQL_USER
+              value: "mineadmin"
+            # 数据库用户密码
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mineadmin-secrets
+                  key: DB_PASSWORD
+            # 字符集配置
+            - name: MYSQL_CHARACTER_SET_SERVER
+              value: "utf8mb4"
+            - name: MYSQL_COLLATION_SERVER
+              value: "utf8mb4_unicode_ci"
+            # 时区配置
+            - name: TZ
+              value: "Asia/Shanghai"
+          args:
+            - "--default-authentication-plugin=mysql_native_password"
+            - "--character-set-server=utf8mb4"
+            - "--collation-server=utf8mb4_unicode_ci"
+            - "--sql-mode=STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO"
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-init
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+        - name: mysql-init
+          configMap:
+            name: mysql-init-script
+---
+# MySQL 初始化脚本配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init-script
+  namespace: mineadmin
+data:
+  init.sql: |
+    -- 创建数据库（如果不存在）
+    CREATE DATABASE IF NOT EXISTS mineadmin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    
+    -- 使用数据库
+    USE mineadmin;
+    
+    -- 创建用户表（如果不存在）
+    CREATE TABLE IF NOT EXISTS `users` (
+      `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      `username` varchar(255) NOT NULL,
+      `password` varchar(255) NOT NULL,
+      `email` varchar(255) DEFAULT NULL,
+      `status` tinyint(1) DEFAULT 1,
+      `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (`id`),
+      UNIQUE KEY `users_username_unique` (`username`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    
+    -- 插入默认管理员用户（密码: admin123）
+    INSERT IGNORE INTO `users` (`username`, `password`, `email`, `status`) 
+    VALUES ('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@mineadmin.com', 1);

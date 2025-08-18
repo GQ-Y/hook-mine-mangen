@@ -1,0 +1,186 @@
+version: '3.8'
+
+# MineAdmin 开发环境 Docker Compose 配置
+# 用于快速启动开发环境，无需K8s
+
+services:
+  # MySQL 数据库服务
+  mysql:
+    image: mysql:8.0
+    container_name: mineadmin-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: mineadmin
+      MYSQL_USER: mineadmin
+      MYSQL_PASSWORD: ${DB_PASSWORD:-mineadmin123}
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./k8s/mysql-init-script:/docker-entrypoint-initdb.d
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - mineadmin-network
+
+  # Redis 缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: mineadmin-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - mineadmin-network
+
+  # 后端服务
+  server-app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server-app
+    container_name: mineadmin-server
+    restart: unless-stopped
+    user: root
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - TZ=Asia/Shanghai
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=mineadmin
+      - DB_USERNAME=mineadmin
+      - DB_PASSWORD=${DB_PASSWORD:-mineadmin123}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis123}
+      - REDIS_DB=0
+    ports:
+      - "9501:9501"
+      - "9502:9502"
+      - "9509:9509"
+    volumes:
+      - server_storage:/storage
+      - server_runtime:/runtime
+      - server_logs:/logs
+      - server_temp:/tmp
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9501/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - mineadmin-network
+
+  # 前端开发服务
+  web-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web-dev
+    container_name: mineadmin-web-dev
+    restart: unless-stopped
+    user: root
+    environment:
+      - NODE_ENV=development
+      - TZ=Asia/Shanghai
+      - VITE_APP_TITLE=MineAdmin
+      - VITE_APP_API_URL=http://localhost:9501
+    ports:
+      - "2888:2888"
+    volumes:
+      - web_source:/app
+      - web_node_modules:/app/node_modules
+      - web_temp:/tmp
+      - web_logs:/logs
+    depends_on:
+      - server-app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2888"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - mineadmin-network
+
+  # 前端生产服务
+  web-prod:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web-prod
+    container_name: mineadmin-web-prod
+    restart: unless-stopped
+    user: root
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "80:80"
+    volumes:
+      - web_dist:/usr/share/nginx/html
+      - web_logs:/var/log/nginx
+    depends_on:
+      - server-app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - mineadmin-network
+    profiles:
+      - production
+
+# 持久化存储卷
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  server_storage:
+    driver: local
+  server_runtime:
+    driver: local
+  server_logs:
+    driver: local
+  server_temp:
+    driver: local
+  web_source:
+    driver: local
+  web_node_modules:
+    driver: local
+  web_temp:
+    driver: local
+  web_logs:
+    driver: local
+  web_dist:
+    driver: local
+
+# 网络配置
+networks:
+  mineadmin-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

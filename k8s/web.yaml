@@ -1,0 +1,305 @@
+# Web 开发模式服务配置
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-dev-service
+  namespace: mineadmin
+  labels:
+    app: web-dev
+    component: frontend
+    mode: development
+spec:
+  type: NodePort
+  ports:
+    - port: 2888
+      targetPort: 2888
+      nodePort: 30288
+      protocol: TCP
+      name: http
+  selector:
+    app: web-dev
+    component: frontend
+---
+# Web 开发模式部署配置
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-dev
+  namespace: mineadmin
+  labels:
+    app: web-dev
+    component: frontend
+    mode: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-dev
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: web-dev
+        component: frontend
+    spec:
+      containers:
+        - name: web-dev
+          image: mineadmin/web-dev:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 2888
+              name: http
+          env:
+            # 前端环境配置
+            - name: VITE_APP_TITLE
+              valueFrom:
+                configMapKeyRef:
+                  name: mineadmin-config
+                  key: VITE_APP_TITLE
+            - name: VITE_APP_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mineadmin-config
+                  key: VITE_APP_API_URL
+            - name: NODE_ENV
+              value: "development"
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: mineadmin-config
+                  key: TZ
+          volumeMounts:
+            - name: web-source
+              mountPath: /app
+            - name: web-node-modules
+              mountPath: /app/node_modules
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 2888
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 2888
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # 启动命令
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "启动Web开发服务器..."
+              cd /app
+              pnpm install
+              pnpm run dev --host 0.0.0.0 --port 2888
+      volumes:
+        - name: web-source
+          persistentVolumeClaim:
+            claimName: web-source-pvc
+        - name: web-node-modules
+          emptyDir: {}
+---
+# Web 生产模式服务配置
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-prod-service
+  namespace: mineadmin
+  labels:
+    app: web-prod
+    component: frontend
+    mode: production
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080
+      protocol: TCP
+      name: http
+  selector:
+    app: web-prod
+    component: frontend
+---
+# Web 生产模式部署配置
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-prod
+  namespace: mineadmin
+  labels:
+    app: web-prod
+    component: frontend
+    mode: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-prod
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: web-prod
+        component: frontend
+    spec:
+      containers:
+        - name: web-prod
+          image: mineadmin/web-prod:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: mineadmin-config
+                  key: TZ
+          volumeMounts:
+            - name: web-dist
+              mountPath: /usr/share/nginx/html
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: web-dist
+          persistentVolumeClaim:
+            claimName: web-dist-pvc
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+---
+# Web 存储卷声明
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-source-pvc
+  namespace: mineadmin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: local-path
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-dist-pvc
+  namespace: mineadmin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path
+---
+# Nginx 配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: mineadmin
+data:
+  nginx.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+        
+        # 启用gzip压缩
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+        
+        # 静态资源缓存
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+        
+        # API代理到后端服务
+        location /api/ {
+            proxy_pass http://server-app-service:9501/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        
+        # WebSocket代理
+        location /ws/ {
+            proxy_pass http://server-app-service:9502/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        
+        # 通知WebSocket代理
+        location /notification/ {
+            proxy_pass http://server-app-service:9509/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        
+        # 前端路由支持
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+        
+        # 错误页面
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            root /usr/share/nginx/html;
+        }
+    }
