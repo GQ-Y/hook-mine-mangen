@@ -17,6 +17,105 @@ MAGENTA='\033[0;35m'
 PURPLE='\033[0;35m'
 NC='\033[0m'
 
+# Dialog检测和安装
+check_and_install_dialog() {
+    if ! command -v dialog &> /dev/null; then
+        print_info "检测到系统未安装dialog，正在安装..."
+        
+        # 检测系统类型并安装dialog
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS
+            if command -v brew &> /dev/null; then
+                print_info "使用Homebrew安装dialog..."
+                if brew install dialog; then
+                    print_success "dialog安装成功"
+                else
+                    print_error "dialog安装失败"
+                    show_dialog_install_guide
+                    exit 1
+                fi
+            else
+                print_error "macOS需要安装Homebrew才能安装dialog"
+                show_dialog_install_guide
+                exit 1
+            fi
+        elif [[ -f /etc/debian_version ]]; then
+            # Debian/Ubuntu
+            print_info "使用apt安装dialog..."
+            if sudo apt-get update && sudo apt-get install -y dialog; then
+                print_success "dialog安装成功"
+            else
+                print_error "dialog安装失败"
+                show_dialog_install_guide
+                exit 1
+            fi
+        elif [[ -f /etc/redhat-release ]]; then
+            # CentOS/RHEL
+            print_info "使用yum/dnf安装dialog..."
+            if sudo yum install -y dialog 2>/dev/null || sudo dnf install -y dialog; then
+                print_success "dialog安装成功"
+            else
+                print_error "dialog安装失败"
+                show_dialog_install_guide
+                exit 1
+            fi
+        else
+            print_error "无法自动安装dialog，请手动安装"
+            show_dialog_install_guide
+            exit 1
+        fi
+        
+        # 验证安装
+        if command -v dialog &> /dev/null; then
+            print_success "dialog安装验证成功"
+            # 等待一秒让用户看到成功消息
+            sleep 1
+        else
+            print_error "dialog安装验证失败"
+            show_dialog_install_guide
+            exit 1
+        fi
+    else
+        print_success "dialog已安装"
+    fi
+}
+
+# 显示dialog安装引导
+show_dialog_install_guide() {
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}📖 Dialog 安装引导${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo -e "${BLUE}macOS 安装方法:${NC}"
+        echo "1. 安装Homebrew（如果未安装）:"
+        echo "   /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        echo ""
+        echo "2. 安装dialog:"
+        echo "   brew install dialog"
+        echo ""
+    elif [[ -f /etc/debian_version ]]; then
+        echo -e "${BLUE}Debian/Ubuntu 安装方法:${NC}"
+        echo "sudo apt-get update && sudo apt-get install -y dialog"
+        echo ""
+    elif [[ -f /etc/redhat-release ]]; then
+        echo -e "${BLUE}CentOS/RHEL 安装方法:${NC}"
+        echo "sudo yum install -y dialog"
+        echo "或"
+        echo "sudo dnf install -y dialog"
+        echo ""
+    else
+        echo -e "${BLUE}通用安装方法:${NC}"
+        echo "请访问 https://invisible-island.net/dialog/ 下载源码编译安装"
+        echo ""
+    fi
+    
+    echo -e "${YELLOW}安装完成后，重新运行此脚本即可使用图形化界面${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
 # 全局变量
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -58,45 +157,158 @@ print_title() {
     echo -e "${NC}"
 }
 
-# 显示主菜单
-show_main_menu() {
+# Dialog主菜单
+dialog_main_menu() {
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_menu$$
+    
+    # 显示主菜单 - 调整尺寸以适应终端
+    dialog --title "🚀 MineAdmin 统一管理工具" \
+           --backtitle "支持 Ubuntu 24.04 | 架构: $ARCH" \
+           --menu "请选择要执行的操作：" 0 0 0 \
+           1 "系统兼容性检测" \
+           2 "一键安装部署" \
+           3 "选择Web模式" \
+           4 "启动所有服务" \
+           5 "停止所有服务" \
+           6 "重启所有服务" \
+           7 "查看服务状态" \
+           8 "查看容器日志" \
+           9 "查看系统资源" \
+           10 "查看网络连接" \
+           11 "重新生成配置" \
+           12 "修改密码" \
+           13 "查看配置信息" \
+           14 "查看已安装插件" \
+           15 "清理Docker缓存" \
+           16 "完全卸载" \
+           17 "安装全局命令" \
+           18 "卸载全局命令" \
+           19 "检查命令状态" \
+           20 "查看帮助" \
+           0 "退出" 2> "$tempfile"
+    
+    # 读取选择结果
+    local choice=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    # 返回选择结果
+    echo "$choice"
+}
+
+# 命令菜单（默认显示）
+show_command_menu() {
     clear
     print_title
     echo ""
-    echo -e "${WHITE}命令面板:${NC}"
+    echo -e "${WHITE}📋 MineAdmin 管理工具 - 可用命令${NC}"
     echo ""
-    
-    # 定义菜单项
-    local menu_items=(
-        "部署管理" "1) 系统兼容性检测 (hook check)" "2) 一键安装部署 (hook install)" "3) 选择Web模式 (hook web)"
-        "服务管理" "4) 启动所有服务 (hook start)" "5) 停止所有服务 (hook stop)" "6) 重启所有服务 (hook restart)"
-        "监控管理" "7) 查看服务状态 (hook status)" "8) 查看容器日志 (hook logs)" "9) 查看系统资源 (hook resources)"
-        "配置管理" "10) 查看网络连接 (hook network)" "11) 重新生成配置 (hook config)" "12) 修改密码 (hook password)"
-        "清理维护" "13) 查看配置信息 (hook info)" "14) 查看已安装插件 (hook plugins)" "15) 清理Docker缓存 (hook clean)"
-        "全局命令" "16) 完全卸载 (hook uninstall)" "17) 安装全局命令 (hook setup)" "18) 卸载全局命令 (hook remove)"
-        "帮助信息" "19) 检查命令状态 (hook test)" "20) 查看帮助 (hook help)" "0) 退出 (exit)"
-    )
-    
-    # 计算每列宽度
-    local col_width=45
-    
-    # 打印菜单项
-    for ((i=0; i<${#menu_items[@]}; i+=4)); do
-        local section="${menu_items[$i]}"
-        local item1="${menu_items[$i+1]}"
-        local item2="${menu_items[$i+2]}"
-        local item3="${menu_items[$i+3]}"
-        
-        # 打印分组标题
-        echo -e "${MAGENTA}${section}${NC}"
-        
-        # 打印菜单项（三列，左对齐）
-        printf "  ${GREEN}%-${col_width}s${NC}" "$item1"
-        printf "${GREEN}%-${col_width}s${NC}" "$item2"
-        printf "${GREEN}%-${col_width}s${NC}\n" "$item3"
-        
-        echo ""
-    done8
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${MAGENTA}🚀 部署管理:${NC}"
+    echo "  ./docker/mineadmin.sh check    - 系统兼容性检测"
+    echo "  ./docker/mineadmin.sh install  - 一键安装部署"
+    echo "  ./docker/mineadmin.sh web      - 选择Web模式"
+    echo ""
+    echo -e "${MAGENTA}⚙️  服务管理:${NC}"
+    echo "  ./docker/mineadmin.sh start    - 启动所有服务"
+    echo "  ./docker/mineadmin.sh stop     - 停止所有服务"
+    echo "  ./docker/mineadmin.sh restart  - 重启所有服务"
+    echo "  ./docker/mineadmin.sh status   - 查看服务状态"
+    echo "  ./docker/mineadmin.sh logs     - 查看容器日志"
+    echo "  ./docker/mineadmin.sh resources - 查看系统资源"
+    echo ""
+    echo -e "${MAGENTA}🔧 配置管理:${NC}"
+    echo "  ./docker/mineadmin.sh network  - 查看网络连接"
+    echo "  ./docker/mineadmin.sh config   - 重新生成配置"
+    echo "  ./docker/mineadmin.sh password - 修改密码"
+    echo "  ./docker/mineadmin.sh info     - 查看配置信息"
+    echo "  ./docker/mineadmin.sh plugins  - 查看已安装插件"
+    echo ""
+    echo -e "${MAGENTA}🧹 清理维护:${NC}"
+    echo "  ./docker/mineadmin.sh clean    - 清理Docker缓存"
+    echo "  ./docker/mineadmin.sh uninstall - 完全卸载"
+    echo ""
+    echo -e "${MAGENTA}🔗 全局命令:${NC}"
+    echo "  ./docker/mineadmin.sh setup    - 安装全局命令"
+    echo "  ./docker/mineadmin.sh remove   - 卸载全局命令"
+    echo "  ./docker/mineadmin.sh test     - 检查命令状态"
+    echo ""
+    echo -e "${MAGENTA}📖 帮助信息:${NC}"
+    echo "  ./docker/mineadmin.sh help     - 查看详细帮助"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${YELLOW}💡 使用提示:${NC}"
+    echo "  1. 直接输入命令即可执行对应功能"
+    echo "  2. 安装全局命令后可使用 'hook <命令>' 简化操作"
+    echo "  3. 使用 'hook help' 查看详细帮助信息"
+    echo ""
+    echo -e "${WHITE}示例:${NC}"
+    echo "  $ ./docker/mineadmin.sh check"
+    echo "  $ ./docker/mineadmin.sh install"
+    echo "  $ ./docker/mineadmin.sh status"
+    echo ""
+    echo -e "${GREEN}✅ 当前脚本支持所有命令模式，无需使用图形化菜单${NC}"
+    echo ""
+    echo -e "${BLUE}按任意键退出...${NC}"
+    read -n 1 -s
+}
+
+# 命令模式菜单（当dialog不可用时显示）
+command_mode_menu() {
+    clear
+    print_title
+    echo ""
+    echo -e "${WHITE}📋 命令模式 - 请使用以下命令:${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${MAGENTA}🚀 部署管理:${NC}"
+    echo "  hook check    - 系统兼容性检测"
+    echo "  hook install  - 一键安装部署"
+    echo "  hook web      - 选择Web模式"
+    echo ""
+    echo -e "${MAGENTA}⚙️  服务管理:${NC}"
+    echo "  hook start    - 启动所有服务"
+    echo "  hook stop     - 停止所有服务"
+    echo "  hook restart  - 重启所有服务"
+    echo "  hook status   - 查看服务状态"
+    echo "  hook logs     - 查看容器日志"
+    echo "  hook resources - 查看系统资源"
+    echo ""
+    echo -e "${MAGENTA}🔧 配置管理:${NC}"
+    echo "  hook network  - 查看网络连接"
+    echo "  hook config   - 重新生成配置"
+    echo "  hook password - 修改密码"
+    echo "  hook info     - 查看配置信息"
+    echo "  hook plugins  - 查看已安装插件"
+    echo ""
+    echo -e "${MAGENTA}🧹 清理维护:${NC}"
+    echo "  hook clean    - 清理Docker缓存"
+    echo "  hook uninstall - 完全卸载"
+    echo ""
+    echo -e "${MAGENTA}🔗 全局命令:${NC}"
+    echo "  hook setup    - 安装全局命令"
+    echo "  hook remove   - 卸载全局命令"
+    echo "  hook test     - 检查命令状态"
+    echo ""
+    echo -e "${MAGENTA}📖 帮助信息:${NC}"
+    echo "  hook help     - 查看帮助信息"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${YELLOW}💡 提示: 直接输入命令即可执行对应功能${NC}"
+    echo ""
+    echo -e "${WHITE}示例:${NC}"
+    echo "  $ hook check"
+    echo "  $ hook install"
+    echo "  $ hook status"
+    echo ""
+    echo -e "${GREEN}✅ 当前脚本支持所有命令模式，无需使用数字菜单${NC}"
+    echo ""
+    echo -e "${BLUE}按任意键继续...${NC}"
+    read -n 1 -s
 }
 
 # 系统兼容性检测
@@ -358,29 +570,38 @@ EOF
 
 # 选择Web模式
 select_web_mode() {
-    echo -e "${WHITE}请选择Web模式:${NC}"
-    echo "1) 开发模式 (pnpm run dev)"
-    echo "2) 生产模式 (nginx)"
-    echo ""
-    read -p "请输入选择 (1-2): " choice
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_web_mode$$
     
-    case $choice in
-        1)
-            print_info "切换到开发模式..."
-            docker-compose -f docker/docker-compose.yml stop web-prod
-            docker-compose -f docker/docker-compose.yml up -d web-dev
-            print_success "已切换到开发模式，访问地址: http://$(hostname -I | awk '{print $1}'):2888"
-            ;;
-        2)
-            print_info "切换到生产模式..."
-            docker-compose -f docker/docker-compose.yml stop web-dev
-            docker-compose -f docker/docker-compose.yml up -d web-prod
-            print_success "已切换到生产模式，访问地址: http://$(hostname -I | awk '{print $1}'):80"
-            ;;
-        *)
-            print_error "无效选择"
-            ;;
-    esac
+    # 显示Web模式选择菜单
+    dialog --title "选择Web模式" \
+           --backtitle "MineAdmin 管理工具" \
+           --menu "请选择Web运行模式：" 10 50 5 \
+           1 "开发模式 (pnpm run dev) - 端口2888" \
+           2 "生产模式 (nginx) - 端口80" 2> "$tempfile"
+    
+    # 读取选择结果
+    local choice=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -n "$choice" ]; then
+        case $choice in
+            1)
+                print_info "切换到开发模式..."
+                docker-compose -f docker/docker-compose.yml stop web-prod
+                docker-compose -f docker/docker-compose.yml up -d web-dev
+                print_success "已切换到开发模式，访问地址: http://$(hostname -I | awk '{print $1}'):2888"
+                ;;
+            2)
+                print_info "切换到生产模式..."
+                docker-compose -f docker/docker-compose.yml stop web-dev
+                docker-compose -f docker/docker-compose.yml up -d web-prod
+                print_success "已切换到生产模式，访问地址: http://$(hostname -I | awk '{print $1}'):80"
+                ;;
+        esac
+    else
+        print_info "取消选择Web模式"
+    fi
 }
 
 # 启动所有服务
@@ -417,37 +638,38 @@ show_service_status() {
     docker stats --no-stream
 }
 
-# 查看容器日志
+# Dialog查看容器日志
 show_container_logs() {
-    echo -e "${WHITE}请选择要查看的容器日志:${NC}"
-    echo "1) MySQL"
-    echo "2) Redis"
-    echo "3) Server App"
-    echo "4) Web Dev"
-    echo "5) Web Prod"
-    echo ""
-    read -p "请输入选择 (1-5): " choice
+    local containers=("MySQL" "Redis" "Server App" "Web Dev" "Web Prod")
+    local services=("mysql" "redis" "server-app" "web-dev" "web-prod")
     
-    case $choice in
-        1)
-            docker-compose -f docker/docker-compose.yml logs mysql
-            ;;
-        2)
-            docker-compose -f docker/docker-compose.yml logs redis
-            ;;
-        3)
-            docker-compose -f docker/docker-compose.yml logs server-app
-            ;;
-        4)
-            docker-compose -f docker/docker-compose.yml logs web-dev
-            ;;
-        5)
-            docker-compose -f docker/docker-compose.yml logs web-prod
-            ;;
-        *)
-            print_error "无效选择"
-            ;;
-    esac
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_logs$$
+    
+    # 显示容器选择菜单
+    dialog --title "查看容器日志" \
+           --backtitle "MineAdmin 管理工具" \
+           --menu "请选择要查看的容器日志：" 12 50 8 \
+           1 "MySQL" \
+           2 "Redis" \
+           3 "Server App" \
+           4 "Web Dev" \
+           5 "Web Prod" 2> "$tempfile"
+    
+    # 读取选择结果
+    local choice=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -n "$choice" ]; then
+        local idx=$((choice-1))
+        local container_name="${containers[$idx]}"
+        local service_name="${services[$idx]}"
+        
+        # 显示日志
+        dialog --title "容器日志 - $container_name" \
+               --backtitle "MineAdmin 管理工具" \
+               --textbox <(docker-compose -f docker/docker-compose.yml logs "$service_name") 20 80
+    fi
 }
 
 # 查看系统资源
@@ -519,36 +741,63 @@ regenerate_config() {
 
 # 修改密码
 change_passwords() {
-    echo -e "${WHITE}请选择要修改的密码:${NC}"
-    echo "1) MySQL Root密码"
-    echo "2) MySQL 用户密码"
-    echo "3) Redis 密码"
-    echo ""
-    read -p "请输入选择 (1-3): " choice
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_password$$
     
-    case $choice in
-        1)
-            read -s -p "请输入新的MySQL Root密码: " new_password
-            echo ""
-            # 这里需要实现修改MySQL Root密码的逻辑
-            print_info "MySQL Root密码修改功能待实现"
-            ;;
-        2)
-            read -s -p "请输入新的MySQL用户密码: " new_password
-            echo ""
-            # 这里需要实现修改MySQL用户密码的逻辑
-            print_info "MySQL用户密码修改功能待实现"
-            ;;
-        3)
-            read -s -p "请输入新的Redis密码: " new_password
-            echo ""
-            # 这里需要实现修改Redis密码的逻辑
-            print_info "Redis密码修改功能待实现"
-            ;;
-        *)
-            print_error "无效选择"
-            ;;
-    esac
+    # 显示密码修改选择菜单
+    dialog --title "修改密码" \
+           --backtitle "MineAdmin 管理工具" \
+           --menu "请选择要修改的密码：" 10 50 5 \
+           1 "MySQL Root密码" \
+           2 "MySQL 用户密码" \
+           3 "Redis 密码" 2> "$tempfile"
+    
+    # 读取选择结果
+    local choice=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -n "$choice" ]; then
+        case $choice in
+            1)
+                # 使用dialog输入新密码
+                local new_password=$(dialog --title "修改MySQL Root密码" \
+                                           --backtitle "MineAdmin 管理工具" \
+                                           --passwordbox "请输入新的MySQL Root密码：" 8 50 3>&1 1>&2 2>&3)
+                if [ -n "$new_password" ]; then
+                    print_info "MySQL Root密码修改功能待实现"
+                    print_info "新密码: $new_password"
+                else
+                    print_info "取消修改MySQL Root密码"
+                fi
+                ;;
+            2)
+                # 使用dialog输入新密码
+                local new_password=$(dialog --title "修改MySQL用户密码" \
+                                           --backtitle "MineAdmin 管理工具" \
+                                           --passwordbox "请输入新的MySQL用户密码：" 8 50 3>&1 1>&2 2>&3)
+                if [ -n "$new_password" ]; then
+                    print_info "MySQL用户密码修改功能待实现"
+                    print_info "新密码: $new_password"
+                else
+                    print_info "取消修改MySQL用户密码"
+                fi
+                ;;
+            3)
+                # 使用dialog输入新密码
+                local new_password=$(dialog --title "修改Redis密码" \
+                                           --backtitle "MineAdmin 管理工具" \
+                                           --passwordbox "请输入新的Redis密码：" 8 50 3>&1 1>&2 2>&3)
+                if [ -n "$new_password" ]; then
+                    print_info "Redis密码修改功能待实现"
+                    print_info "新密码: $new_password"
+                else
+                    print_info "取消修改Redis密码"
+                fi
+                ;;
+        esac
+    else
+        print_info "取消修改密码"
+    fi
 }
 
 # 查看配置信息
@@ -839,14 +1088,29 @@ ask_install_plugins() {
         "jileapp/blog - 博客插件"
     )
     
-    echo -e "${WHITE}可用插件:${NC}"
-    for i in "${!available_plugins[@]}"; do
-        echo "  $((i+1))) ${available_plugins[$i]}"
-    done
-    echo "  0) 跳过插件安装"
-    echo ""
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_plugins$$
     
-    read -p "请选择要安装的插件 (0-${#available_plugins[@]}): " plugin_choice
+    # 构建插件菜单选项
+    local menu_options=""
+    for i in "${!available_plugins[@]}"; do
+        menu_options="$menu_options $((i+1)) \"${available_plugins[$i]}\""
+    done
+    menu_options="$menu_options 0 \"跳过插件安装\""
+    
+    # 显示插件选择菜单
+    eval dialog --title "插件安装" \
+         --backtitle "MineAdmin 管理工具" \
+         --menu "请选择要安装的插件：" 15 70 10 $menu_options 2> "$tempfile"
+    
+    # 读取选择结果
+    local plugin_choice=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -z "$plugin_choice" ]; then
+        print_info "取消插件安装"
+        return
+    fi
     
     if [[ "$plugin_choice" == "0" ]]; then
         print_info "跳过插件安装"
@@ -864,9 +1128,12 @@ ask_install_plugins() {
         echo "swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php mine-extension:install $plugin_name -y"
         echo ""
         
-        read -p "确认安装此插件吗？(y/N): " confirm_install
+        # 使用dialog确认安装
+        dialog --title "确认安装插件" \
+               --backtitle "MineAdmin 管理工具" \
+               --yesno "确认安装此插件吗？\n\n插件: $selected_plugin" 8 60
         
-        if [[ "$confirm_install" == "y" || "$confirm_install" == "Y" ]]; then
+        if [ $? -eq 0 ]; then
             print_info "正在安装插件: $plugin_name"
             
             # 进入容器执行插件安装命令
@@ -1032,84 +1299,8 @@ main() {
         exit 0
     fi
     
-    # 主循环
-    while true; do
-        show_main_menu
-        read -p "请输入选择 (0-20): " choice
-        
-        case $choice in
-            0)
-                print_info "退出程序"
-                exit 0
-                ;;
-            1)
-                check_system_compatibility
-                ;;
-            2)
-                install_mineadmin
-                ;;
-            3)
-                select_web_mode
-                ;;
-            4)
-                start_services
-                ;;
-            5)
-                stop_services
-                ;;
-            6)
-                restart_services
-                ;;
-            7)
-                show_service_status
-                ;;
-            8)
-                show_container_logs
-                ;;
-            9)
-                show_system_resources
-                ;;
-            10)
-                show_network_connections
-                ;;
-            11)
-                regenerate_config
-                ;;
-            12)
-                change_passwords
-                ;;
-            13)
-                show_config_info
-                ;;
-            14)
-                show_installed_plugins
-                ;;
-            15)
-                clean_docker_cache
-                ;;
-            16)
-                uninstall_mineadmin
-                ;;
-            17)
-                install_global_command
-                ;;
-            18)
-                uninstall_global_command
-                ;;
-            19)
-                check_command_status
-                ;;
-            20)
-                show_help
-                ;;
-            *)
-                print_error "无效选择，请重新输入"
-                ;;
-        esac
-        
-        echo ""
-        read -p "按回车键继续..."
-    done
+    # 没有参数时，显示命令菜单
+    show_command_menu
 }
 
 # 运行主函数
