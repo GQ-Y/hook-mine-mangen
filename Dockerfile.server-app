@@ -63,20 +63,22 @@ RUN mkdir -p /runtime/container/proxy \
     && chmod -R 777 /logs \
     && chmod -R 777 /tmp
 
-# 复制 swoole-cli 根据架构
+# 复制 swoole-cli 文件到容器中
+COPY docker/cli/ /tmp/cli/
+
 # 检测系统架构并复制相应的 swoole-cli
 RUN if [ "$TARGETARCH" = "amd64" ] || [ "$TARGETARCH" = "x86_64" ]; then \
         echo "使用 x64 架构的 swoole-cli"; \
-        cp docker/cli/x64/swoole-cli /usr/local/bin/swoole-cli; \
+        cp /tmp/cli/x64/swoole-cli /usr/local/bin/swoole-cli; \
     elif [ "$TARGETARCH" = "arm64" ] || [ "$TARGETARCH" = "aarch64" ]; then \
         echo "使用 ARM64 架构的 swoole-cli"; \
-        cp docker/cli/arm64/swoole-cli /usr/local/bin/swoole-cli; \
+        cp /tmp/cli/arm64/swoole-cli /usr/local/bin/swoole-cli; \
     elif [ "$TARGETOS" = "darwin" ]; then \
         echo "使用 macOS 架构的 swoole-cli"; \
-        cp docker/cli/macos/swoole-cli /usr/local/bin/swoole-cli; \
+        cp /tmp/cli/macos/swoole-cli /usr/local/bin/swoole-cli; \
     else \
         echo "未知架构，使用 x64 架构的 swoole-cli"; \
-        cp docker/cli/x64/swoole-cli /usr/local/bin/swoole-cli; \
+        cp /tmp/cli/x64/swoole-cli /usr/local/bin/swoole-cli; \
     fi
 
 # 设置 swoole-cli 执行权限
@@ -84,6 +86,10 @@ RUN chmod +x /usr/local/bin/swoole-cli
 
 # 创建 swoole-cli 软链接到系统路径
 RUN ln -sf /usr/local/bin/swoole-cli /usr/bin/swoole-cli
+
+# 创建 Swoole 配置文件
+RUN mkdir -p /usr/local/swoole-cli/etc && \
+    echo "swoole.use_shortname=Off" > /usr/local/swoole-cli/etc/php.ini
 
 # 复制应用代码
 COPY server-app/ /app/

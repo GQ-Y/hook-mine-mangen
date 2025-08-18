@@ -111,8 +111,6 @@ services:
       - web_node_modules:/app/node_modules
       - web_temp:/tmp
       - web_logs:/logs
-    depends_on:
-      - server-app
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:2888"]
       interval: 30s
@@ -137,8 +135,6 @@ services:
     volumes:
       - web_dist:/usr/share/nginx/html
       - web_logs:/var/log/nginx
-    depends_on:
-      - server-app
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]
       interval: 30s
