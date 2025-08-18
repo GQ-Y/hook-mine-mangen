@@ -1,5 +1,3 @@
-version: '3.8'
-
 # MineAdmin 开发环境 Docker Compose 配置
 # 用于快速启动开发环境，无需K8s
 

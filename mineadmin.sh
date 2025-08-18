@@ -519,12 +519,12 @@ EOF
     docker build --platform $build_arch -f docker/Dockerfile.server-app -t mineadmin/server-app:latest .
     
     # 构建前端开发镜像
-    docker build --platform $build_arch -f docker/Dockerfile.web-dev -t mineadmin/web-dev:latest ./web
+    docker build --platform $build_arch -f docker/Dockerfile.web-dev -t mineadmin/web-dev:latest .
     
     # 构建前端生产镜像
-    docker build --platform $build_arch -f docker/Dockerfile.web-prod -t mineadmin/web-prod:latest ./web
+    docker build --platform $build_arch -f docker/Dockerfile.web-prod -t mineadmin/web-prod:latest .
     
-    # 启动服务
+    # 启动服务（默认开发模式）
     print_info "正在启动服务..."
     docker-compose -f docker/docker-compose.yml up -d
     
@@ -532,7 +532,7 @@ EOF
     print_info "等待服务启动..."
     sleep 30
     
-    # 检查服务状态
+    # 检查服务状态（默认开发模式）
     if docker-compose -f docker/docker-compose.yml ps | grep -q "Up"; then
         print_success "MineAdmin安装完成！"
         echo ""
@@ -585,17 +585,20 @@ select_web_mode() {
     rm -f "$tempfile"
     
     if [ -n "$choice" ]; then
+        # 切换到项目根目录
+        cd "$PROJECT_ROOT"
+        
         case $choice in
             1)
                 print_info "切换到开发模式..."
-                docker-compose -f docker/docker-compose.yml stop web-prod
+                docker-compose -f docker/docker-compose.yml --profile production stop web-prod
                 docker-compose -f docker/docker-compose.yml up -d web-dev
                 print_success "已切换到开发模式，访问地址: http://$(hostname -I | awk '{print $1}'):2888"
                 ;;
             2)
                 print_info "切换到生产模式..."
                 docker-compose -f docker/docker-compose.yml stop web-dev
-                docker-compose -f docker/docker-compose.yml up -d web-prod
+                docker-compose -f docker/docker-compose.yml --profile production up -d web-prod
                 print_success "已切换到生产模式，访问地址: http://$(hostname -I | awk '{print $1}'):80"
                 ;;
         esac
@@ -608,15 +611,17 @@ select_web_mode() {
 start_services() {
     print_info "正在启动所有服务..."
     cd "$PROJECT_ROOT"
+    # 默认启动开发模式，不包含生产模式
     docker-compose -f docker/docker-compose.yml up -d
-    print_success "所有服务已启动"
+    print_success "所有服务已启动（开发模式）"
 }
 
 # 停止所有服务
 stop_services() {
     print_info "正在停止所有服务..."
     cd "$PROJECT_ROOT"
-    docker-compose -f docker/docker-compose.yml down
+    # 停止所有服务（包括生产模式）
+    docker-compose -f docker/docker-compose.yml --profile production down
     print_success "所有服务已停止"
 }
 
@@ -624,6 +629,7 @@ stop_services() {
 restart_services() {
     print_info "正在重启所有服务..."
     cd "$PROJECT_ROOT"
+    # 重启当前运行的服务（不包括生产模式）
     docker-compose -f docker/docker-compose.yml restart
     print_success "所有服务已重启"
 }
@@ -632,7 +638,8 @@ restart_services() {
 show_service_status() {
     print_info "服务状态:"
     cd "$PROJECT_ROOT"
-    docker-compose -f docker/docker-compose.yml ps
+    # 显示所有服务状态（包括生产模式）
+    docker-compose -f docker/docker-compose.yml --profile production ps
     echo ""
     print_info "系统资源使用情况:"
     docker stats --no-stream
@@ -665,10 +672,18 @@ show_container_logs() {
         local container_name="${containers[$idx]}"
         local service_name="${services[$idx]}"
         
-        # 显示日志
-        dialog --title "容器日志 - $container_name" \
-               --backtitle "MineAdmin 管理工具" \
-               --textbox <(docker-compose -f docker/docker-compose.yml logs "$service_name") 20 80
+        # 切换到项目目录并显示日志
+        cd "$PROJECT_ROOT"
+        # 根据服务类型选择不同的compose命令
+        if [[ "$service_name" == "web-prod" ]]; then
+            dialog --title "容器日志 - $container_name" \
+                   --backtitle "MineAdmin 管理工具" \
+                   --textbox <(docker-compose -f docker/docker-compose.yml --profile production logs "$service_name") 20 80
+        else
+            dialog --title "容器日志 - $container_name" \
+                   --backtitle "MineAdmin 管理工具" \
+                   --textbox <(docker-compose -f docker/docker-compose.yml logs "$service_name") 20 80
+        fi
     fi
 }
 
@@ -857,7 +872,7 @@ uninstall_mineadmin() {
         
         # 停止并删除容器
         cd "$PROJECT_ROOT"
-        docker-compose -f docker/docker-compose.yml down -v
+        docker-compose -f docker/docker-compose.yml --profile production down -v
         
         # 删除镜像
         docker rmi mineadmin/server-app:latest mineadmin/web-dev:latest mineadmin/web-prod:latest 2>/dev/null || true

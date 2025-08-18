@@ -35,7 +35,7 @@ RUN node --version && npm --version && pnpm --version
 WORKDIR /app
 
 # 复制前端源代码
-COPY server-app/web/ /app/
+COPY web/ /app/
 
 # 设置 pnpm 镜像源
 RUN pnpm config set registry https://registry.npmmirror.com/
