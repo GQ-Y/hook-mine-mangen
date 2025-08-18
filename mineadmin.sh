@@ -170,22 +170,24 @@ dialog_main_menu() {
            2 "一键安装部署" \
            3 "选择Web模式" \
            4 "启动所有服务" \
-           5 "停止所有服务" \
-           6 "重启所有服务" \
-           7 "查看服务状态" \
-           8 "查看容器日志" \
-           9 "查看系统资源" \
-           10 "查看网络连接" \
-           11 "重新生成配置" \
-           12 "修改密码" \
-           13 "查看配置信息" \
-           14 "查看已安装插件" \
-           15 "清理Docker缓存" \
-           16 "完全卸载" \
-           17 "安装全局命令" \
-           18 "卸载全局命令" \
-           19 "检查命令状态" \
-           20 "查看帮助" \
+           5 "选择性启动服务" \
+           6 "停止所有服务" \
+           7 "重启所有服务" \
+           8 "查看服务状态" \
+           9 "查看容器日志" \
+           10 "查看系统资源" \
+           11 "查看网络连接" \
+           12 "重新生成配置" \
+           13 "修改密码" \
+           14 "查看配置信息" \
+           15 "查看已安装插件" \
+           16 "设置开机自启动" \
+           17 "清理Docker缓存" \
+           18 "完全卸载" \
+           19 "安装全局命令" \
+           20 "卸载全局命令" \
+           21 "检查命令状态" \
+           22 "查看帮助" \
            0 "退出" 2> "$tempfile"
     
     # 读取选择结果
@@ -212,6 +214,7 @@ show_command_menu() {
     echo ""
     echo -e "${MAGENTA}⚙️  服务管理:${NC}"
     echo "  ./docker/mineadmin.sh start    - 启动所有服务"
+    echo "  ./docker/mineadmin.sh sestart       - 选择性启动服务"
     echo "  ./docker/mineadmin.sh stop     - 停止所有服务"
     echo "  ./docker/mineadmin.sh restart  - 重启所有服务"
     echo "  ./docker/mineadmin.sh status   - 查看服务状态"
@@ -271,6 +274,7 @@ command_mode_menu() {
     echo ""
     echo -e "${MAGENTA}⚙️  服务管理:${NC}"
     echo "  hook start    - 启动所有服务"
+    echo "  hook sestart  - 选择性启动服务"
     echo "  hook stop     - 停止所有服务"
     echo "  hook restart  - 重启所有服务"
     echo "  hook status   - 查看服务状态"
@@ -616,6 +620,107 @@ start_services() {
     print_success "所有服务已启动（开发模式）"
 }
 
+# 选择性启动服务
+selective_start_services() {
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_selective_start$$
+    
+    # 显示服务选择菜单（支持多选）
+    dialog --title "选择性启动服务" \
+           --backtitle "MineAdmin 管理工具" \
+           --checklist "请选择要启动的服务（空格选择，回车确认）：" 15 60 8 \
+           "mysql" "MySQL数据库" on \
+           "redis" "Redis缓存" on \
+           "server-app" "后端服务" off \
+           "web-dev" "前端开发服务" off \
+           "web-prod" "前端生产服务" off 2> "$tempfile"
+    
+    # 读取选择结果
+    local selected_services=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -z "$selected_services" ]; then
+        print_info "取消启动服务"
+        return
+    fi
+    
+    # 切换到项目目录
+    cd "$PROJECT_ROOT"
+    
+    # 检查是否需要启动后端服务
+    local need_backend=false
+    if echo "$selected_services" | grep -q "server-app"; then
+        need_backend=true
+    fi
+    
+    # 检查是否需要启动前端生产服务
+    local need_production=false
+    if echo "$selected_services" | grep -q "web-prod"; then
+        need_production=true
+    fi
+    
+    print_info "正在启动选中的服务..."
+    
+    # 启动基础服务（MySQL和Redis）
+    if echo "$selected_services" | grep -q "mysql\|redis"; then
+        local base_services=""
+        if echo "$selected_services" | grep -q "mysql"; then
+            base_services="$base_services mysql"
+        fi
+        if echo "$selected_services" | grep -q "redis"; then
+            base_services="$base_services redis"
+        fi
+        
+        if [ -n "$base_services" ]; then
+            print_info "启动基础服务: $base_services"
+            docker-compose -f docker/docker-compose.yml up -d $base_services
+        fi
+    fi
+    
+    # 启动后端服务（需要MySQL和Redis）
+    if [ "$need_backend" = true ]; then
+        print_info "启动后端服务..."
+        docker-compose -f docker/docker-compose.yml up -d server-app
+    fi
+    
+    # 启动前端开发服务
+    if echo "$selected_services" | grep -q "web-dev"; then
+        print_info "启动前端开发服务..."
+        docker-compose -f docker/docker-compose.yml up -d web-dev
+    fi
+    
+    # 启动前端生产服务
+    if [ "$need_production" = true ]; then
+        print_info "启动前端生产服务..."
+        docker-compose -f docker/docker-compose.yml --profile production up -d web-prod
+    fi
+    
+    print_success "选中的服务已启动"
+    
+    # 显示启动的服务信息
+    echo ""
+    echo -e "${WHITE}已启动的服务:${NC}"
+    for service in $selected_services; do
+        case $service in
+            "mysql")
+                echo "  ✅ MySQL数据库 - 端口: 3306"
+                ;;
+            "redis")
+                echo "  ✅ Redis缓存 - 端口: 6379"
+                ;;
+            "server-app")
+                echo "  ✅ 后端服务 - 端口: 9501, 9502, 9509"
+                ;;
+            "web-dev")
+                echo "  ✅ 前端开发服务 - 端口: 2888"
+                ;;
+            "web-prod")
+                echo "  ✅ 前端生产服务 - 端口: 80"
+                ;;
+        esac
+    done
+}
+
 # 停止所有服务
 stop_services() {
     print_info "正在停止所有服务..."
@@ -851,6 +956,241 @@ show_installed_plugins() {
         echo -e "${WHITE}手动查看插件目录:${NC}"
         docker-compose -f docker/docker-compose.yml exec -T server-app ls -la /app/plugin/ 2>/dev/null || echo "插件目录不存在"
     }
+}
+
+# 设置开机自启动
+setup_autostart() {
+    # 检查是否为Linux系统
+    if [[ "$OSTYPE" != "linux-gnu"* ]]; then
+        print_error "开机自启动功能仅支持Linux系统"
+        echo "当前系统: $OSTYPE"
+        return 1
+    fi
+    
+    # 检查是否为Ubuntu系统
+    if [[ ! -f /etc/os-release ]] || ! grep -q "ubuntu" /etc/os-release; then
+        print_warning "此功能主要针对Ubuntu系统优化，其他Linux发行版可能不兼容"
+    fi
+    
+    # 检查systemd是否可用
+    if ! command -v systemctl &> /dev/null; then
+        print_error "系统不支持systemd，无法设置开机自启动"
+        return 1
+    fi
+    
+    # 检查Docker服务状态
+    if ! systemctl is-active --quiet docker; then
+        print_error "Docker服务未运行，请先启动Docker服务"
+        echo "启动命令: sudo systemctl start docker"
+        return 1
+    fi
+    
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_autostart$$
+    
+    # 显示自启动选择菜单
+    dialog --title "设置开机自启动" \
+           --backtitle "MineAdmin 管理工具" \
+           --menu "请选择要设置的服务：" 12 60 6 \
+           1 "Docker服务" \
+           2 "MineAdmin服务" \
+           3 "Docker + MineAdmin服务" \
+           4 "查看当前自启动状态" \
+           5 "禁用所有自启动" 2> "$tempfile"
+    
+    # 读取选择结果
+    local choice=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -z "$choice" ]; then
+        print_info "取消设置开机自启动"
+        return
+    fi
+    
+    case $choice in
+        1)
+            setup_docker_autostart
+            ;;
+        2)
+            setup_mineadmin_autostart
+            ;;
+        3)
+            setup_docker_autostart
+            setup_mineadmin_autostart
+            ;;
+        4)
+            show_autostart_status
+            ;;
+        5)
+            disable_autostart
+            ;;
+    esac
+}
+
+# 设置Docker开机自启动
+setup_docker_autostart() {
+    print_info "正在设置Docker服务开机自启动..."
+    
+    if sudo systemctl enable docker; then
+        print_success "Docker服务开机自启动已启用"
+    else
+        print_error "设置Docker开机自启动失败"
+        return 1
+    fi
+}
+
+# 设置MineAdmin开机自启动
+setup_mineadmin_autostart() {
+    print_info "正在设置MineAdmin服务开机自启动..."
+    
+    # 创建systemd服务文件
+    local service_file="/etc/systemd/system/mineadmin.service"
+    local user=$(whoami)
+    
+    # 检查项目路径是否存在
+    if [ ! -d "$PROJECT_ROOT" ]; then
+        print_error "项目路径不存在: $PROJECT_ROOT"
+        return 1
+    fi
+    
+    # 创建服务文件内容
+    local service_content="[Unit]
+Description=MineAdmin Docker Compose Services
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=$PROJECT_ROOT
+ExecStart=/usr/local/bin/docker-compose -f docker/docker-compose.yml up -d
+ExecStop=/usr/local/bin/docker-compose -f docker/docker-compose.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target"
+    
+    # 写入服务文件
+    if echo "$service_content" | sudo tee "$service_file" > /dev/null; then
+        print_success "MineAdmin服务文件已创建"
+    else
+        print_error "创建MineAdmin服务文件失败"
+        return 1
+    fi
+    
+    # 重新加载systemd配置
+    if sudo systemctl daemon-reload; then
+        print_success "systemd配置已重新加载"
+    else
+        print_error "重新加载systemd配置失败"
+        return 1
+    fi
+    
+    # 启用服务
+    if sudo systemctl enable mineadmin.service; then
+        print_success "MineAdmin服务开机自启动已启用"
+    else
+        print_error "启用MineAdmin开机自启动失败"
+        return 1
+    fi
+    
+    print_info "MineAdmin服务将在系统启动时自动启动"
+    print_info "服务文件位置: $service_file"
+}
+
+# 查看自启动状态
+show_autostart_status() {
+    echo -e "${WHITE}当前开机自启动状态:${NC}"
+    echo ""
+    
+    # 检查Docker服务状态
+    echo -e "${BLUE}Docker服务:${NC}"
+    if systemctl is-enabled docker &> /dev/null; then
+        local docker_status=$(systemctl is-enabled docker)
+        if [[ "$docker_status" == "enabled" ]]; then
+            print_success "Docker服务已启用开机自启动"
+        else
+            print_warning "Docker服务开机自启动状态: $docker_status"
+        fi
+    else
+        print_error "无法获取Docker服务状态"
+    fi
+    
+    echo ""
+    
+    # 检查MineAdmin服务状态
+    echo -e "${BLUE}MineAdmin服务:${NC}"
+    if systemctl is-enabled mineadmin.service &> /dev/null; then
+        local mineadmin_status=$(systemctl is-enabled mineadmin.service)
+        if [[ "$mineadmin_status" == "enabled" ]]; then
+            print_success "MineAdmin服务已启用开机自启动"
+        else
+            print_warning "MineAdmin服务开机自启动状态: $mineadmin_status"
+        fi
+    else
+        print_warning "MineAdmin服务未配置开机自启动"
+    fi
+    
+    echo ""
+    
+    # 显示服务文件信息
+    if [ -f "/etc/systemd/system/mineadmin.service" ]; then
+        echo -e "${BLUE}MineAdmin服务文件:${NC}"
+        echo "位置: /etc/systemd/system/mineadmin.service"
+        echo "状态: 已创建"
+    else
+        echo -e "${BLUE}MineAdmin服务文件:${NC}"
+        echo "状态: 未创建"
+    fi
+}
+
+# 禁用所有自启动
+disable_autostart() {
+    print_info "正在禁用所有开机自启动..."
+    
+    # 禁用MineAdmin服务
+    if systemctl is-enabled mineadmin.service &> /dev/null; then
+        if sudo systemctl disable mineadmin.service; then
+            print_success "MineAdmin服务开机自启动已禁用"
+        else
+            print_error "禁用MineAdmin开机自启动失败"
+        fi
+    else
+        print_info "MineAdmin服务未配置开机自启动"
+    fi
+    
+    # 删除MineAdmin服务文件
+    if [ -f "/etc/systemd/system/mineadmin.service" ]; then
+        if sudo rm -f "/etc/systemd/system/mineadmin.service"; then
+            print_success "MineAdmin服务文件已删除"
+        else
+            print_error "删除MineAdmin服务文件失败"
+        fi
+        
+        # 重新加载systemd配置
+        if sudo systemctl daemon-reload; then
+            print_success "systemd配置已重新加载"
+        else
+            print_error "重新加载systemd配置失败"
+        fi
+    fi
+    
+    # 询问是否禁用Docker服务自启动
+    dialog --title "禁用Docker自启动" \
+           --backtitle "MineAdmin 管理工具" \
+           --yesno "是否同时禁用Docker服务的开机自启动？\n\n注意：禁用Docker自启动可能影响其他Docker应用" 8 60
+    
+    if [ $? -eq 0 ]; then
+        if sudo systemctl disable docker; then
+            print_success "Docker服务开机自启动已禁用"
+        else
+            print_error "禁用Docker开机自启动失败"
+        fi
+    else
+        print_info "保留Docker服务开机自启动"
+    fi
+    
+    print_success "所有开机自启动已禁用"
 }
 
 # 清理Docker缓存
@@ -1181,6 +1521,7 @@ show_help() {
     echo ""
     echo -e "${BLUE}⚙️  服务管理:${NC}"
     echo "- 启动所有服务: hook start"
+    echo "- 选择性启动服务: hook sestart"
     echo "- 停止所有服务: hook stop"
     echo "- 重启所有服务: hook restart"
     echo "- 查看服务状态: hook status"
@@ -1239,6 +1580,9 @@ handle_hook_command() {
         start)
             start_services
             ;;
+        sestart)
+            selective_start_services
+            ;;
         stop)
             stop_services
             ;;
@@ -1268,6 +1612,9 @@ handle_hook_command() {
             ;;
         plugins)
             show_installed_plugins
+            ;;
+        autostart)
+            setup_autostart
             ;;
         clean)
             clean_docker_cache
