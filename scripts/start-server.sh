@@ -11,8 +11,6 @@ echo "=========================================="
 
 # 设置环境变量
 export TZ=${TZ:-"Asia/Shanghai"}
-export APP_ENV=${APP_ENV:-"production"}
-export APP_DEBUG=${APP_DEBUG:-"false"}
 
 # 设置应用目录
 export APP_RUNTIME_PATH="/runtime"
@@ -21,25 +19,50 @@ export APP_LOG_PATH="/logs"
 export APP_TEMP_PATH="/tmp"
 
 echo "📅 时区设置: $TZ"
-echo "🌍 环境模式: $APP_ENV"
-echo "🐛 调试模式: $APP_DEBUG"
 
-# 检查必要的环境变量
-if [ -z "$DB_HOST" ]; then
-    echo "❌ 错误: 数据库主机地址未设置"
+# 检查 .env 文件是否存在
+if [ ! -f /app/.env ]; then
+    echo "❌ 错误: .env 文件不存在"
     exit 1
 fi
 
-if [ -z "$REDIS_HOST" ]; then
-    echo "❌ 错误: Redis主机地址未设置"
-    exit 1
-fi
+echo "✅ 找到 .env 文件"
 
-echo "✅ 环境变量检查完成"
+# 读取 .env 文件并设置环境变量
+echo "🔧 加载环境配置..."
+while IFS='=' read -r key value; do
+    # 跳过注释和空行
+    if [[ $key =~ ^[[:space:]]*# ]] || [[ -z $key ]]; then
+        continue
+    fi
+    
+    # 移除前后空格
+    key=$(echo $key | xargs)
+    value=$(echo $value | xargs)
+    
+    # 设置环境变量
+    export "$key=$value"
+done < /app/.env
+
+# 覆盖数据库和 Redis 配置以适配 Docker 网络
+echo "🔧 更新网络配置以适配 Docker 环境..."
+export DB_HOST="mysql"
+export REDIS_HOST="redis"
+export DB_PASSWORD="${DB_PASSWORD:-mineadmin123}"
+export REDIS_AUTH="${REDIS_PASSWORD:-redis123}"
+
+echo "✅ 环境配置已加载"
+echo "📋 当前环境配置:"
+echo "   APP_ENV: ${APP_ENV}"
+echo "   APP_DEBUG: ${APP_DEBUG}"
+echo "   DB_HOST: ${DB_HOST}"
+echo "   REDIS_HOST: ${REDIS_HOST}"
+echo "   DB_PASSWORD: ${DB_PASSWORD}"
+echo "   REDIS_AUTH: ${REDIS_AUTH}"
 
 # 等待数据库服务就绪
 echo "⏳ 等待数据库服务就绪..."
-while ! nc -z $DB_HOST 3306; do
+while ! nc -z mysql 3306; do
     echo "   数据库服务未就绪，等待 2 秒..."
     sleep 2
 done
@@ -47,7 +70,7 @@ echo "✅ 数据库服务已就绪"
 
 # 等待Redis服务就绪
 echo "⏳ 等待Redis服务就绪..."
-while ! nc -z $REDIS_HOST 6379; do
+while ! nc -z redis 6379; do
     echo "   Redis服务未就绪，等待 2 秒..."
     sleep 2
 done

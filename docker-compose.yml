@@ -56,18 +56,7 @@ services:
     restart: unless-stopped
     user: root
     environment:
-      - APP_ENV=production
-      - APP_DEBUG=false
       - TZ=Asia/Shanghai
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - DB_DATABASE=mineadmin
-      - DB_USERNAME=mineadmin
-      - DB_PASSWORD=${DB_PASSWORD:-mineadmin123}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_AUTH=${REDIS_PASSWORD:-redis123}
-      - REDIS_DB=0
     ports:
       - "9501:9501"
       - "9502:9502"
@@ -77,6 +66,8 @@ services:
       - server_runtime:/runtime
       - server_logs:/logs
       - server_temp:/tmp
+      # 映射宿主机的 .env 文件到容器
+      - ../server-app/.env:/app/.env
     depends_on:
       mysql:
         condition: service_healthy
