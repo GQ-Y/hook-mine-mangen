@@ -91,58 +91,28 @@ services:
     networks:
       - mineadmin-network
 
-  # 前端开发服务
-  web-dev:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.web-dev
-    container_name: mineadmin-web-dev
-    restart: unless-stopped
-    user: root
-    environment:
-      - NODE_ENV=development
-      - TZ=Asia/Shanghai
-      - VITE_APP_TITLE=MineAdmin
-      - VITE_APP_API_URL=http://localhost:9501
-    ports:
-      - "2888:2888"
-    volumes:
-      - web_temp:/tmp
-      - web_logs:/logs
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:2888"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    networks:
-      - mineadmin-network
-
-  # 前端生产服务
+  # 前端生产服务 - 使用nginx镜像，只映射dist目录
   web-prod:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.web-prod
+    image: nginx:alpine
     container_name: mineadmin-web-prod
     restart: unless-stopped
-    user: root
     environment:
       - TZ=Asia/Shanghai
     ports:
       - "80:80"
     volumes:
-      - web_dist:/usr/share/nginx/html
+      # 生产模式：只映射构建后的dist目录和nginx配置
+      - ../web/dist:/usr/share/nginx/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
       - web_logs:/var/log/nginx
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
     networks:
       - mineadmin-network
-    profiles:
-      - production
 
 # 持久化存储卷
 volumes:
@@ -158,15 +128,7 @@ volumes:
     driver: local
   server_temp:
     driver: local
-  web_source:
-    driver: local
-  web_node_modules:
-    driver: local
-  web_temp:
-    driver: local
   web_logs:
-    driver: local
-  web_dist:
     driver: local
 
 # 网络配置

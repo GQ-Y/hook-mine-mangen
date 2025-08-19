@@ -210,7 +210,7 @@ show_command_menu() {
     echo -e "${MAGENTA}🚀 部署管理:${NC}"
     echo "  ./docker/mineadmin.sh check    - 系统兼容性检测"
     echo "  ./docker/mineadmin.sh install  - 一键安装部署"
-    echo "  ./docker/mineadmin.sh web      - 选择Web模式"
+    echo "  ./docker/mineadmin.sh build    - 前端构建"
     echo ""
     echo -e "${MAGENTA}⚙️  服务管理:${NC}"
     echo "  ./docker/mineadmin.sh start    - 启动所有服务"
@@ -224,6 +224,7 @@ show_command_menu() {
     echo -e "${MAGENTA}🔧 配置管理:${NC}"
     echo "  ./docker/mineadmin.sh network  - 查看网络连接"
     echo "  ./docker/mineadmin.sh config   - 重新生成配置"
+    echo "  ./docker/mineadmin.sh generate-config - 交互式生成配置"
     echo "  ./docker/mineadmin.sh password - 修改密码"
     echo "  ./docker/mineadmin.sh info     - 查看配置信息"
     echo "  ./docker/mineadmin.sh plugins  - 查看已安装插件"
@@ -270,7 +271,7 @@ command_mode_menu() {
     echo -e "${MAGENTA}🚀 部署管理:${NC}"
     echo "  hook check    - 系统兼容性检测"
     echo "  hook install  - 一键安装部署"
-    echo "  hook web      - 选择Web模式"
+    echo "  hook build    - 前端构建"
     echo ""
     echo -e "${MAGENTA}⚙️  服务管理:${NC}"
     echo "  hook start    - 启动所有服务"
@@ -284,6 +285,7 @@ command_mode_menu() {
     echo -e "${MAGENTA}🔧 配置管理:${NC}"
     echo "  hook network  - 查看网络连接"
     echo "  hook config   - 重新生成配置"
+    echo "  hook generate-config - 交互式生成配置"
     echo "  hook password - 修改密码"
     echo "  hook info     - 查看配置信息"
     echo "  hook plugins  - 查看已安装插件"
@@ -444,63 +446,14 @@ install_mineadmin() {
         print_success "Docker Compose已安装"
     fi
     
-    # 生成随机密码
-    local mysql_root_password=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
-    local mysql_password=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
-    local redis_password=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
-    
-    # 获取本机IP
-    local host_ip=$(hostname -I | awk '{print $1}')
-    
-    # 创建.env文件
+    # 生成配置文件
     print_info "正在生成配置文件..."
+    generate_config_interactive
     
-    # 后端配置
-    cat > "$PROJECT_ROOT/server-app/.env" << EOF
-APP_NAME=MineAdmin
-APP_ENV=production
-APP_KEY=
-APP_DEBUG=false
-APP_URL=http://$host_ip:9501
-APP_TIMEZONE=Asia/Shanghai
-
-# 数据库配置
-DB_CONNECTION=mysql
-DB_HOST=mysql
-DB_PORT=3306
-DB_DATABASE=mineadmin
-DB_USERNAME=mineadmin
-DB_PASSWORD=$mysql_password
-
-# Redis配置
-REDIS_HOST=redis
-REDIS_PASSWORD=$redis_password
-REDIS_PORT=6379
-REDIS_DB=0
-
-# JWT配置
-JWT_SECRET=$(openssl rand -base64 32)
-
-# 应用路径配置（容器内路径）
-APP_RUNTIME_PATH=/runtime
-APP_STORAGE_PATH=/storage
-APP_LOG_PATH=/logs
-APP_TEMP_PATH=/tmp
-EOF
-    
-    # 前端开发配置
-    cat > "$PROJECT_ROOT/web/.env.development" << EOF
-VITE_APP_API_URL=http://$host_ip:9501
-VITE_APP_BASE_API=/api
-VITE_APP_UPLOAD_URL=http://$host_ip:9501/upload
-EOF
-    
-    # 前端生产配置
-    cat > "$PROJECT_ROOT/web/.env.production" << EOF
-VITE_APP_API_URL=http://$host_ip:9501
-VITE_APP_BASE_API=/api
-VITE_APP_UPLOAD_URL=http://$host_ip:9501/upload
-EOF
+    if [ $? -ne 0 ]; then
+        print_error "配置生成失败，安装终止"
+        return 1
+    fi
     
     # 构建Docker镜像
     print_info "正在构建Docker镜像..."
@@ -522,13 +475,10 @@ EOF
     # 构建后端镜像
     docker build --platform $build_arch -f docker/Dockerfile.server-app -t mineadmin/server-app:latest .
     
-    # 构建前端开发镜像
-    docker build --platform $build_arch -f docker/Dockerfile.web-dev -t mineadmin/web-dev:latest .
-    
     # 构建前端生产镜像
     docker build --platform $build_arch -f docker/Dockerfile.web-prod -t mineadmin/web-prod:latest .
     
-    # 启动服务（默认开发模式）
+    # 启动服务
     print_info "正在启动服务..."
     docker-compose -f docker/docker-compose.yml up -d
     
@@ -536,26 +486,19 @@ EOF
     print_info "等待服务启动..."
     sleep 30
     
-    # 检查服务状态（默认开发模式）
+    # 检查服务状态
     if docker-compose -f docker/docker-compose.yml ps | grep -q "Up"; then
         print_success "MineAdmin安装完成！"
         echo ""
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${WHITE}🎯 访问信息:${NC}"
-        echo "后端API: http://$host_ip:9501"
-        echo "前端开发: http://$host_ip:2888"
-        echo "前端生产: http://$host_ip:80"
-        echo ""
-        echo -e "${WHITE}🔐 数据库信息:${NC}"
-        echo "MySQL Root密码: $mysql_root_password"
-        echo "MySQL 用户密码: $mysql_password"
-        echo "Redis 密码: $redis_password"
+        echo "后端API: http://localhost:9501"
+        echo "前端生产: http://localhost:80"
         echo ""
         echo -e "${WHITE}📡 监听端口:${NC}"
         echo "9501 - 后端API服务"
         echo "9502 - WebSocket服务"
         echo "9509 - 通知服务"
-        echo "2888 - 前端开发服务"
         echo "80   - 前端生产服务"
         echo "3306 - MySQL数据库"
         echo "6379 - Redis缓存"
@@ -581,8 +524,7 @@ select_web_mode() {
     dialog --title "选择Web模式" \
            --backtitle "MineAdmin 管理工具" \
            --menu "请选择Web运行模式：" 10 50 5 \
-           1 "开发模式 (pnpm run dev) - 端口2888" \
-           2 "生产模式 (nginx) - 端口80" 2> "$tempfile"
+           1 "生产模式 (nginx) - 端口80" 2> "$tempfile"
     
     # 读取选择结果
     local choice=$(cat "$tempfile" 2>/dev/null)
@@ -594,15 +536,8 @@ select_web_mode() {
         
         case $choice in
             1)
-                print_info "切换到开发模式..."
-                docker-compose -f docker/docker-compose.yml --profile production stop web-prod
-                docker-compose -f docker/docker-compose.yml up -d web-dev
-                print_success "已切换到开发模式，访问地址: http://$(hostname -I | awk '{print $1}'):2888"
-                ;;
-            2)
                 print_info "切换到生产模式..."
-                docker-compose -f docker/docker-compose.yml stop web-dev
-                docker-compose -f docker/docker-compose.yml --profile production up -d web-prod
+                docker-compose -f docker/docker-compose.yml up -d web-prod
                 print_success "已切换到生产模式，访问地址: http://$(hostname -I | awk '{print $1}'):80"
                 ;;
         esac
@@ -615,9 +550,9 @@ select_web_mode() {
 start_services() {
     print_info "正在启动所有服务..."
     cd "$PROJECT_ROOT"
-    # 默认启动开发模式，不包含生产模式
+    # 启动所有服务
     docker-compose -f docker/docker-compose.yml up -d
-    print_success "所有服务已启动（开发模式）"
+    print_success "所有服务已启动"
 }
 
 # 选择性启动服务
@@ -632,7 +567,6 @@ selective_start_services() {
            "mysql" "MySQL数据库" on \
            "redis" "Redis缓存" on \
            "server-app" "后端服务" off \
-           "web-dev" "前端开发服务" off \
            "web-prod" "前端生产服务" off 2> "$tempfile"
     
     # 读取选择结果
@@ -683,16 +617,10 @@ selective_start_services() {
         docker-compose -f docker/docker-compose.yml up -d server-app
     fi
     
-    # 启动前端开发服务
-    if echo "$selected_services" | grep -q "web-dev"; then
-        print_info "启动前端开发服务..."
-        docker-compose -f docker/docker-compose.yml up -d web-dev
-    fi
-    
     # 启动前端生产服务
     if [ "$need_production" = true ]; then
         print_info "启动前端生产服务..."
-        docker-compose -f docker/docker-compose.yml --profile production up -d web-prod
+        docker-compose -f docker/docker-compose.yml up -d web-prod
     fi
     
     print_success "选中的服务已启动"
@@ -711,9 +639,6 @@ selective_start_services() {
             "server-app")
                 echo "  ✅ 后端服务 - 端口: 9501, 9502, 9509"
                 ;;
-            "web-dev")
-                echo "  ✅ 前端开发服务 - 端口: 2888"
-                ;;
             "web-prod")
                 echo "  ✅ 前端生产服务 - 端口: 80"
                 ;;
@@ -725,8 +650,8 @@ selective_start_services() {
 stop_services() {
     print_info "正在停止所有服务..."
     cd "$PROJECT_ROOT"
-    # 停止所有服务（包括生产模式）
-    docker-compose -f docker/docker-compose.yml --profile production down
+    # 停止所有服务
+    docker-compose -f docker/docker-compose.yml down
     print_success "所有服务已停止"
 }
 
@@ -743,8 +668,8 @@ restart_services() {
 show_service_status() {
     print_info "服务状态:"
     cd "$PROJECT_ROOT"
-    # 显示所有服务状态（包括生产模式）
-    docker-compose -f docker/docker-compose.yml --profile production ps
+    # 显示所有服务状态
+    docker-compose -f docker/docker-compose.yml ps
     echo ""
     print_info "系统资源使用情况:"
     docker stats --no-stream
@@ -752,8 +677,8 @@ show_service_status() {
 
 # Dialog查看容器日志
 show_container_logs() {
-    local containers=("MySQL" "Redis" "Server App" "Web Dev" "Web Prod")
-    local services=("mysql" "redis" "server-app" "web-dev" "web-prod")
+    local containers=("MySQL" "Redis" "Server App" "Web Prod")
+    local services=("mysql" "redis" "server-app" "web-prod")
     
     # 创建临时文件存储选择
     local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_logs$$
@@ -765,8 +690,7 @@ show_container_logs() {
            1 "MySQL" \
            2 "Redis" \
            3 "Server App" \
-           4 "Web Dev" \
-           5 "Web Prod" 2> "$tempfile"
+           4 "Web Prod" 2> "$tempfile"
     
     # 读取选择结果
     local choice=$(cat "$tempfile" 2>/dev/null)
@@ -779,16 +703,9 @@ show_container_logs() {
         
         # 切换到项目目录并显示日志
         cd "$PROJECT_ROOT"
-        # 根据服务类型选择不同的compose命令
-        if [[ "$service_name" == "web-prod" ]]; then
-            dialog --title "容器日志 - $container_name" \
-                   --backtitle "MineAdmin 管理工具" \
-                   --textbox <(docker-compose -f docker/docker-compose.yml --profile production logs "$service_name") 20 80
-        else
-            dialog --title "容器日志 - $container_name" \
-                   --backtitle "MineAdmin 管理工具" \
-                   --textbox <(docker-compose -f docker/docker-compose.yml logs "$service_name") 20 80
-        fi
+        dialog --title "容器日志 - $container_name" \
+               --backtitle "MineAdmin 管理工具" \
+               --textbox <(docker-compose -f docker/docker-compose.yml logs "$service_name") 20 80
     fi
 }
 
@@ -834,29 +751,284 @@ show_network_connections() {
 regenerate_config() {
     print_info "正在重新生成配置..."
     
-    # 生成新的随机密码
-    local mysql_root_password=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
-    local mysql_password=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
-    local redis_password=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
+    echo ""
+    echo -e "${WHITE}请选择配置生成方式：${NC}"
+    echo "  1) 快速配置 (使用默认值)"
+    echo "  2) 交互式配置 (自定义所有选项)"
+    echo ""
+    echo -e "${CYAN}请输入选择 (1-2):${NC}"
+    read -r choice
     
-    # 获取本机IP
-    local host_ip=$(hostname -I | awk '{print $1}')
-    
-    # 更新后端配置
-    sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$mysql_password/" "$PROJECT_ROOT/server-app/.env"
-    sed -i "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=$redis_password/" "$PROJECT_ROOT/server-app/.env"
-    sed -i "s/APP_URL=.*/APP_URL=http:\/\/$host_ip:9501/" "$PROJECT_ROOT/server-app/.env"
-    
-    # 更新前端配置
-    sed -i "s/VITE_APP_API_URL=.*/VITE_APP_API_URL=http:\/\/$host_ip:9501/" "$PROJECT_ROOT/web/.env.development"
-    sed -i "s/VITE_APP_API_URL=.*/VITE_APP_API_URL=http:\/\/$host_ip:9501/" "$PROJECT_ROOT/web/.env.production"
+    case $choice in
+        1)
+            generate_config_quick
+            ;;
+        2)
+            generate_config_interactive
+            ;;
+        *)
+            print_info "配置生成已取消"
+            return
+            ;;
+    esac
     
     print_success "配置已重新生成"
+}
+
+# 快速配置生成
+generate_config_quick() {
+    print_info "正在生成快速配置..."
+    
+    # 生成随机密钥
+    local jwt_secret=$(openssl rand -base64 32)
+    local mine_access_token="" # 默认空
+    
+    # 获取系统内网IP地址
+    local local_ip=$(ifconfig | grep -E "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -1)
+    if [ -z "$local_ip" ]; then
+        local_ip="127.0.0.1"
+    fi
+    local app_url="http://$local_ip:9501"
+    
+    # 使用您提供的默认配置值
+    local app_name="MineAdmin"
+    local app_debug="true"
+    local db_driver="mysql"
+    local db_host="mysql"
+    local db_port="3306"
+    local db_database="mineadmin"
+    local db_username="root"
+    local db_password="123456"
+    local redis_host="redis"
+    local redis_port="6379"
+    local redis_password="123456"
+    local redis_db="3"
+    
+    # 生成配置文件
+    generate_config_files "$app_name" "$app_debug" "$app_url" \
+                         "$db_driver" "$db_host" "$db_port" "$db_database" "$db_username" "$db_password" \
+                         "$redis_host" "$redis_port" "$redis_password" "$redis_db" \
+                         "$mine_access_token" "$jwt_secret"
+    
+    print_success "快速配置生成完成！"
     echo ""
-    echo -e "${WHITE}新的密码信息:${NC}"
-    echo "MySQL Root密码: $mysql_root_password"
-    echo "MySQL 用户密码: $mysql_password"
-    echo "Redis 密码: $redis_password"
+    echo -e "${WHITE}默认配置信息:${NC}"
+    echo "  应用名称: $app_name"
+    echo "  调试模式: $app_debug"
+    echo "  应用URL: $app_url"
+    echo "  数据库类型: $db_driver"
+    echo "  数据库: $db_host:$db_port/$db_database"
+    echo "  Redis: $redis_host:$redis_port"
+    echo ""
+    echo -e "${YELLOW}注意: 请重新构建容器以使新配置生效${NC}"
+}
+
+# 生成配置文件
+generate_config_files() {
+    local app_name="$1"
+    local app_debug="$2"
+    local app_url="$3"
+    local db_driver="$4"
+    local db_host="$5"
+    local db_port="$6"
+    local db_database="$7"
+    local db_username="$8"
+    local db_password="$9"
+    local redis_host="${10}"
+    local redis_port="${11}"
+    local redis_password="${12}"
+    local redis_db="${13}"
+    local mine_access_token="${14}"
+    local jwt_secret="${15}"
+    
+    # 固定环境为 dev
+    local app_env="dev"
+    
+    # 生成后端.env文件
+    print_info "正在生成后端配置文件..."
+    cat > "$PROJECT_ROOT/server-app/.env" << EOF
+APP_NAME=$app_name
+APP_ENV=$app_env
+APP_DEBUG=$app_debug
+
+DB_DRIVER=$db_driver
+DB_HOST=$db_host
+DB_PORT=$db_port
+DB_DATABASE=$db_database
+DB_USERNAME=$db_username
+DB_PASSWORD=$db_password
+DB_CHARSET=utf8mb4
+DB_COLLATION=utf8mb4_unicode_ci
+DB_PREFIX=
+
+REDIS_HOST=$redis_host
+REDIS_AUTH=$redis_password
+REDIS_PORT=$redis_port
+REDIS_DB=$redis_db
+
+APP_URL = $app_url
+
+JWT_SECRET=$jwt_secret
+
+MINE_ACCESS_TOKEN=$mine_access_token
+EOF
+}
+
+# 交互式配置生成
+generate_config_interactive() {
+    print_info "开始交互式配置生成..."
+    echo ""
+    
+    # 获取系统内网IP地址
+    local local_ip=$(ifconfig | grep -E "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -1)
+    if [ -z "$local_ip" ]; then
+        local_ip="127.0.0.1"
+    fi
+    
+    # 使用固定的默认配置值
+    local default_app_name="MineAdmin"
+    local default_app_debug="true"
+    local default_app_url="http://$local_ip:9501"
+    local default_db_driver="mysql"
+    local default_db_host="mysql"
+    local default_db_port="3306"
+    local default_db_database="mineadmin"
+    local default_db_username="root"
+    local default_db_password="123456"
+    local default_redis_host="redis"
+    local default_redis_port="6379"
+    local default_redis_password="123456"
+    local default_redis_db="3"
+    local default_mine_access_token=""
+    
+    # 生成JWT密钥
+    local jwt_secret=$(openssl rand -base64 32)
+    
+    echo -e "${WHITE}=== MineAdmin 配置生成向导 ===${NC}"
+    echo ""
+    
+    # 应用名称
+    echo -e "${CYAN}应用名称${NC} [默认: $default_app_name]:"
+    read -r app_name
+    app_name="${app_name:-$default_app_name}"
+    
+    # 调试模式
+    echo -e "${CYAN}是否启用调试模式？${NC} [默认: $default_app_debug] (true/false):"
+    read -r app_debug
+    app_debug="${app_debug:-$default_app_debug}"
+    
+    # 应用URL
+    echo -e "${CYAN}应用URL${NC} [默认: $default_app_url]:"
+    read -r app_url
+    app_url="${app_url:-$default_app_url}"
+    
+    echo ""
+    echo -e "${WHITE}=== 数据库配置 ===${NC}"
+    echo ""
+    
+    # 数据库类型选择
+    echo -e "${CYAN}选择数据库类型${NC} [默认: $default_db_driver] (mysql/postgresql):"
+    read -r db_driver
+    db_driver="${db_driver:-$default_db_driver}"
+    
+    # 数据库主机
+    echo -e "${CYAN}数据库主机${NC} [默认: $default_db_host]:"
+    read -r db_host
+    db_host="${db_host:-$default_db_host}"
+    
+    # 数据库端口
+    local default_port
+    if [[ "$db_driver" == "postgresql" ]]; then
+        default_port="5432"
+    else
+        default_port="3306"
+    fi
+    echo -e "${CYAN}数据库端口${NC} [默认: $default_port]:"
+    read -r db_port
+    db_port="${db_port:-$default_port}"
+    
+    # 数据库名称
+    echo -e "${CYAN}数据库名称${NC} [默认: $default_db_database]:"
+    read -r db_database
+    db_database="${db_database:-$default_db_database}"
+    
+    # 数据库用户名
+    echo -e "${CYAN}数据库用户名${NC} [默认: $default_db_username]:"
+    read -r db_username
+    db_username="${db_username:-$default_db_username}"
+    
+    # 数据库密码
+    echo -e "${CYAN}数据库密码${NC} [默认: 123456]:"
+    read -s db_password
+    echo ""
+    db_password="${db_password:-$default_db_password}"
+    
+    echo ""
+    echo -e "${WHITE}=== Redis配置 ===${NC}"
+    echo ""
+    
+    # Redis主机
+    echo -e "${CYAN}Redis主机${NC} [默认: $default_redis_host]:"
+    read -r redis_host
+    redis_host="${redis_host:-$default_redis_host}"
+    
+    # Redis端口
+    echo -e "${CYAN}Redis端口${NC} [默认: $default_redis_port]:"
+    read -r redis_port
+    redis_port="${redis_port:-$default_redis_port}"
+    
+    # Redis密码
+    echo -e "${CYAN}Redis密码${NC} [默认: 123456]:"
+    read -s redis_password
+    echo ""
+    redis_password="${redis_password:-$default_redis_password}"
+    
+    # Redis数据库
+    echo -e "${CYAN}Redis数据库${NC} [默认: $default_redis_db]:"
+    read -r redis_db
+    redis_db="${redis_db:-$default_redis_db}"
+    
+    echo ""
+    echo -e "${WHITE}=== 其他配置 ===${NC}"
+    echo ""
+    
+    # Mine访问令牌（默认为空）
+    echo -e "${CYAN}Mine访问令牌${NC} [默认: 空] (可选，直接回车跳过):"
+    read -r mine_access_token
+    mine_access_token="${mine_access_token:-}"
+    
+    echo ""
+    
+    # 显示配置摘要
+    echo -e "${WHITE}=== 配置摘要 ===${NC}"
+    echo "  应用名称: $app_name"
+    echo "  调试模式: $app_debug"
+    echo "  应用URL: $app_url"
+    echo "  数据库类型: $db_driver"
+    echo "  数据库: $db_host:$db_port/$db_database"
+    echo "  Redis: $redis_host:$redis_port"
+    echo ""
+    
+    # 确认配置
+    echo -e "${YELLOW}确认生成配置文件？(y/N):${NC}"
+    read -r confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_info "配置生成已取消"
+        return
+    fi
+    
+    # 生成配置文件
+    generate_config_files "$app_name" "$app_debug" "$app_url" \
+                         "$db_driver" "$db_host" "$db_port" "$db_database" "$db_username" "$db_password" \
+                         "$redis_host" "$redis_port" "$redis_password" "$redis_db" \
+                         "$mine_access_token" "$jwt_secret"
+    
+    print_success "配置文件生成完成！"
+    echo ""
+    echo -e "${WHITE}生成的文件:${NC}"
+    echo "  ✅ $PROJECT_ROOT/server-app/.env"
+    echo ""
+    echo -e "${YELLOW}注意: 请重新构建容器以使新配置生效${NC}"
 }
 
 # 修改密码
@@ -932,6 +1104,94 @@ show_config_info() {
     echo ""
     echo -e "${BLUE}前端生产配置 (.env.production):${NC}"
     cat "$PROJECT_ROOT/web/.env.production"
+}
+
+# 前端构建
+build_frontend() {
+    print_info "开始前端构建..."
+    
+    # 检查是否为root用户
+    if [[ $EUID -eq 0 ]]; then
+        print_error "请不要使用root用户运行此脚本"
+        return 1
+    fi
+    
+    cd "$PROJECT_ROOT"
+    
+    # 检查web目录是否存在
+    if [ ! -d "web" ]; then
+        print_error "web目录不存在: $PROJECT_ROOT/web"
+        return 1
+    fi
+    
+    # 检查系统是否安装了Node.js和pnpm
+    print_info "检查Node.js和pnpm环境..."
+    
+    if ! command -v node &> /dev/null; then
+        print_error "Node.js未安装，请先安装Node.js"
+        echo "安装命令: curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs"
+        return 1
+    fi
+    
+    if ! command -v pnpm &> /dev/null; then
+        print_error "pnpm未安装，请先安装pnpm"
+        echo "安装命令: npm install -g pnpm"
+        return 1
+    fi
+    
+    print_success "Node.js版本: $(node --version)"
+    print_success "pnpm版本: $(pnpm --version)"
+    
+    # 进入web目录
+    cd web
+    
+    # 检查package.json是否存在
+    if [ ! -f "package.json" ]; then
+        print_error "package.json不存在，请检查web目录是否正确"
+        return 1
+    fi
+    
+    # 清理旧的构建文件
+    print_info "清理旧的构建文件..."
+    rm -rf node_modules dist pnpm-lock.yaml
+    
+    # 安装依赖
+    print_info "安装前端依赖..."
+    pnpm config set registry https://registry.npmmirror.com/
+    pnpm install
+    
+    if [ $? -ne 0 ]; then
+        print_error "依赖安装失败"
+        return 1
+    fi
+    
+    # 构建生产版本
+    print_info "构建生产版本..."
+    pnpm build
+    
+    if [ $? -ne 0 ]; then
+        print_error "构建失败"
+        return 1
+    fi
+    
+    # 检查构建结果
+    if [ ! -d "dist" ]; then
+        print_error "构建失败，dist目录不存在"
+        return 1
+    fi
+    
+    print_success "前端构建完成！"
+    echo ""
+    echo -e "${WHITE}构建结果:${NC}"
+    echo "  ✅ 依赖安装完成"
+    echo "  ✅ 生产版本构建完成"
+    echo "  ✅ dist目录已生成"
+    echo ""
+    echo -e "${WHITE}dist目录内容:${NC}"
+    ls -la dist/
+    echo ""
+    echo -e "${YELLOW}注意: 现在可以启动生产模式服务${NC}"
+    echo "启动命令: hook web (选择生产模式)"
 }
 
 # 查看已安装插件
@@ -1215,7 +1475,7 @@ uninstall_mineadmin() {
         docker-compose -f docker/docker-compose.yml --profile production down -v
         
         # 删除镜像
-        docker rmi mineadmin/server-app:latest mineadmin/web-dev:latest mineadmin/web-prod:latest 2>/dev/null || true
+        docker rmi mineadmin/server-app:latest mineadmin/web-prod:latest 2>/dev/null || true
         
         # 删除配置文件
         rm -f "$PROJECT_ROOT/server-app/.env"
@@ -1517,7 +1777,8 @@ show_help() {
     echo -e "${BLUE}🚀 快速开始:${NC}"
     echo "1. 运行系统兼容性检测: hook check"
     echo "2. 执行一键安装部署: hook install"
-    echo "3. 选择Web模式: hook web"
+    echo "3. 前端构建: hook build"
+    echo "4. 启动服务: hook start"
     echo ""
     echo -e "${BLUE}⚙️  服务管理:${NC}"
     echo "- 启动所有服务: hook start"
@@ -1530,6 +1791,7 @@ show_help() {
     echo ""
     echo -e "${BLUE}🔧 配置管理:${NC}"
     echo "- 重新生成配置: hook config"
+    echo "- 交互式生成配置: hook generate-config"
     echo "- 修改密码: hook password"
     echo "- 查看配置信息: hook info"
     echo "- 查看已安装插件: hook plugins"
@@ -1549,16 +1811,19 @@ show_help() {
     echo "- x86_64 或 ARM64 架构"
     echo "- 至少2GB内存"
     echo "- 至少10GB可用磁盘空间"
+    echo "- Node.js 22.x"
+    echo "- pnpm 10.x"
     echo ""
     echo -e "${BLUE}🌐 访问地址:${NC}"
     echo "- 后端API: http://服务器IP:9501"
-    echo "- 前端开发: http://服务器IP:2888"
     echo "- 前端生产: http://服务器IP:80"
     echo ""
     echo -e "${BLUE}💡 使用提示:${NC}"
     echo "- 直接使用 'hook' 命令进入交互式菜单"
     echo "- 使用 'hook <命令>' 直接执行对应功能"
     echo "- 使用 'hook help' 查看此帮助信息"
+    echo "- 生产模式：只映射dist目录，性能更优"
+    echo "- 开发建议：直接在宿主机运行 'pnpm run dev'"
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
@@ -1575,7 +1840,11 @@ handle_hook_command() {
             install_mineadmin
             ;;
         web)
-            select_web_mode
+            print_info "Web模式选择功能已移除，现在只支持生产模式"
+            print_info "如需开发，请在宿主机运行: cd web && pnpm run dev"
+            ;;
+        build)
+            build_frontend
             ;;
         start)
             start_services
@@ -1603,6 +1872,9 @@ handle_hook_command() {
             ;;
         config)
             regenerate_config
+            ;;
+        generate-config)
+            generate_config_interactive
             ;;
         password)
             change_passwords

@@ -1,64 +1,16 @@
 # MineAdmin 前端生产模式 Dockerfile
-# 基于 Ubuntu 24.04 系统构建
+# 基于 nginx Alpine 镜像运行构建后的静态文件
 
-# 第一阶段：构建阶段
-FROM ubuntu:24.04 AS builder
-
-# 设置环境变量
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Shanghai
-ENV NODE_VERSION=22
-ENV PNPM_VERSION=10.6.5
-
-# 更换为阿里云镜像源并安装基础依赖
-RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    apt-get update && apt-get install -y \
-    curl \
-    wget \
-    git \
-    unzip \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
-    && apt-get install -y nodejs
-
-# 安装 pnpm
-RUN npm install -g pnpm@${PNPM_VERSION}
-
-# 验证安装
-RUN node --version && npm --version && pnpm --version
-
-# 设置工作目录
-WORKDIR /app
-
-# 复制前端源代码
-COPY web/ /app/
-
-# 设置 pnpm 镜像源
-RUN pnpm config set registry https://registry.npmmirror.com/
-
-# 清理可能存在的 node_modules 和 lock 文件，解决 ARM64 架构下的依赖问题
-RUN rm -rf node_modules package-lock.json pnpm-lock.yaml
-
-# 安装依赖
-RUN pnpm install
-
-# 构建生产版本
-RUN pnpm build
-
-# 第二阶段：运行阶段
 FROM nginx:alpine
 
-# 复制构建产物到 nginx 目录
-COPY --from=builder /app/dist /usr/share/nginx/html
+# 设置环境变量
+ENV TZ=Asia/Shanghai
 
 # 复制 nginx 配置
 COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf
+
+# 创建必要的目录
+RUN mkdir -p /var/log/nginx
 
 # 暴露端口
 EXPOSE 80
