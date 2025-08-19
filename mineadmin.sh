@@ -282,6 +282,7 @@ show_command_menu() {
     echo -e "${CYAN}[24]${NC} ${WHITE}./docker/mineadmin.sh k8s-status${NC}  ${GREEN}▶${NC} ${YELLOW}查看集群状态${NC}"
     echo -e "${CYAN}[25]${NC} ${WHITE}./docker/mineadmin.sh k8s-logs${NC}    ${GREEN}▶${NC} ${YELLOW}查看组件日志${NC}"
     echo -e "${CYAN}[26]${NC} ${WHITE}./docker/mineadmin.sh k8s-config${NC}  ${GREEN}▶${NC} ${YELLOW}生成配置文件${NC}"
+    echo -e "${CYAN}[27]${NC} ${WHITE}./docker/mineadmin.sh k8s-diagnose${NC}  ${GREEN}▶${NC} ${YELLOW}诊断初始化问题${NC}"
     echo ""
     
     echo -e "${WHITE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
@@ -405,6 +406,7 @@ command_mode_menu() {
     echo "  hook k8s-status - 查看集群状态"
     echo "  hook k8s-logs - 查看组件日志"
     echo "  hook k8s-config - 生成配置文件"
+    echo "  hook k8s-diagnose - 诊断初始化问题"
     echo ""
     echo -e "${MAGENTA}📥 项目初始化:${NC}"
     echo "  hook init      - 从官方仓库初始化项目"
@@ -2856,9 +2858,12 @@ show_k8s_menu_cli() {
     echo "  9. 恢复集群配置"
     echo "  10. 卸载K8s集群"
     echo ""
+    echo -e "${MAGENTA}🔍 故障诊断:${NC}"
+    echo "  11. 诊断初始化问题"
+    echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "${CYAN}请选择操作 (1-10):${NC}"
+    echo -e "${CYAN}请选择操作 (1-11):${NC}"
     read -r choice
     
     case $choice in
@@ -2891,6 +2896,9 @@ show_k8s_menu_cli() {
             ;;
         10)
             uninstall_k8s_cluster
+            ;;
+        11)
+            diagnose_k8s_init
             ;;
         *)
             print_info "取消操作"
@@ -3392,7 +3400,7 @@ Environment="KUBELET_AUTHZ_ARGS=--authorization-mode=Webhook --client-ca-file=/e
 Environment="KUBELET_CADVISOR_ARGS=--cadvisor-port=0"
 Environment="KUBELET_CGROUP_ARGS=--cgroup-driver=systemd"
 Environment="KUBELET_CERTIFICATE_ARGS=--rotate-certificates=true --cert-dir=/var/lib/kubelet/pki"
-Environment="KUBELET_EXTRA_ARGS=--container-runtime-endpoint=unix:///var/run/containerd/containerd.sock --container-runtime=remote"
+Environment="KUBELET_EXTRA_ARGS=--container-runtime-endpoint=unix:///var/run/containerd/containerd.sock"
 ExecStart=
 ExecStart=/usr/local/bin/kubelet \$KUBELET_KUBECONFIG_ARGS \$KUBELET_CONFIG_ARGS \$KUBELET_KUBEADM_ARGS \$KUBELET_EXTRA_ARGS
 EOF
@@ -3410,8 +3418,34 @@ EOF
 init_k8s_cluster() {
     print_info "初始化K8s集群..."
     
-    # 获取本机IP
-    local node_ip=$(hostname -I | awk '{print $1}')
+    # 获取本机IP（优先使用公网IP或内网IP，排除Docker容器IP）
+    local node_ip=""
+    
+    # 方法1: 尝试获取公网IP
+    if command -v curl &> /dev/null; then
+        node_ip=$(curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
+        if [[ -n "$node_ip" && "$node_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            print_info "检测到公网IP: $node_ip"
+        else
+            node_ip=""
+        fi
+    fi
+    
+    # 方法2: 如果没有公网IP，获取内网IP（排除Docker容器IP）
+    if [[ -z "$node_ip" ]]; then
+        node_ip=$(hostname -I | tr ' ' '\n' | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1)
+        if [[ -z "$node_ip" ]]; then
+            # 如果还是没找到，使用第一个非Docker的IP
+            node_ip=$(hostname -I | tr ' ' '\n' | grep -v '^172\.1[7-9]\.' | grep -v '^172\.2[0-9]\.' | grep -v '^172\.3[01]\.' | head -1)
+        fi
+        print_info "使用内网IP: $node_ip"
+    fi
+    
+    # 如果还是没找到，使用默认方法
+    if [[ -z "$node_ip" ]]; then
+        node_ip=$(hostname -I | awk '{print $1}')
+        print_warning "使用默认IP: $node_ip"
+    fi
     
     # 初始化集群（添加必要的参数）
     print_info "使用IP: $node_ip 初始化集群..."
@@ -3430,12 +3464,74 @@ init_k8s_cluster() {
     print_success "K8s集群初始化完成"
 }
 
+# 诊断K8s初始化问题
+diagnose_k8s_init() {
+    print_info "诊断K8s初始化问题..."
+    
+    echo -e "${YELLOW}📊 系统信息:${NC}"
+    echo "操作系统: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
+    echo "内核版本: $(uname -r)"
+    echo "架构: $(uname -m)"
+    
+    echo -e "${YELLOW}🌐 网络信息:${NC}"
+    echo "所有IP地址:"
+    hostname -I
+    echo ""
+    echo "网络接口:"
+    ip addr show | grep -E "inet.*scope global" | awk '{print $2, $7}'
+    
+    echo -e "${YELLOW}🔧 服务状态:${NC}"
+    echo "containerd状态:"
+    sudo systemctl status containerd --no-pager | head -10
+    echo ""
+    echo "kubelet状态:"
+    sudo systemctl status kubelet --no-pager | head -10
+    
+    echo -e "${YELLOW}📋 kubelet日志:${NC}"
+    sudo journalctl -u kubelet --no-pager | tail -20
+    
+    echo -e "${YELLOW}💾 磁盘空间:${NC}"
+    df -h /
+    
+    echo -e "${YELLOW}🧠 内存使用:${NC}"
+    free -h
+    
+    echo -e "${YELLOW}🌡️  CPU使用:${NC}"
+    top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1
+}
+
 # 初始化主控节点
 init_master_node() {
     print_info "初始化主控节点..."
     
-    # 获取本机IP
-    local node_ip=$(hostname -I | awk '{print $1}')
+    # 获取本机IP（优先使用公网IP或内网IP，排除Docker容器IP）
+    local node_ip=""
+    
+    # 方法1: 尝试获取公网IP
+    if command -v curl &> /dev/null; then
+        node_ip=$(curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
+        if [[ -n "$node_ip" && "$node_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            print_info "检测到公网IP: $node_ip"
+        else
+            node_ip=""
+        fi
+    fi
+    
+    # 方法2: 如果没有公网IP，获取内网IP（排除Docker容器IP）
+    if [[ -z "$node_ip" ]]; then
+        node_ip=$(hostname -I | tr ' ' '\n' | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1)
+        if [[ -z "$node_ip" ]]; then
+            # 如果还是没找到，使用第一个非Docker的IP
+            node_ip=$(hostname -I | tr ' ' '\n' | grep -v '^172\.1[7-9]\.' | grep -v '^172\.2[0-9]\.' | grep -v '^172\.3[01]\.' | head -1)
+        fi
+        print_info "使用内网IP: $node_ip"
+    fi
+    
+    # 如果还是没找到，使用默认方法
+    if [[ -z "$node_ip" ]]; then
+        node_ip=$(hostname -I | awk '{print $1}')
+        print_warning "使用默认IP: $node_ip"
+    fi
     
     # 初始化主控节点（添加必要的参数）
     print_info "使用IP: $node_ip 初始化主控节点..."
@@ -3474,21 +3570,163 @@ deploy_mineadmin_to_k8s() {
     print_info "部署MineAdmin到K8s..."
     
     # 创建命名空间
-    kubectl create namespace mineadmin
+    kubectl create namespace mineadmin --dry-run=client -o yaml | kubectl apply -f -
     
-    # 创建配置文件
-    local k8s_dir="$PROJECT_ROOT/docker/k8s"
+    # 创建配置文件目录
+    local k8s_dir="$PROJECT_ROOT/docker/k8s/manifests"
     mkdir -p "$k8s_dir"
     
-    # 生成MineAdmin部署配置
-    cat > "$k8s_dir/mineadmin-deployment.yaml" << EOF
+    # 1. 部署MySQL
+    print_info "部署MySQL数据库..."
+    cat > "$k8s_dir/mysql.yaml" << 'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: mineadmin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: mineadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "root123"
+        - name: MYSQL_DATABASE
+          value: "mineadmin"
+        - name: MYSQL_USER
+          value: "mineadmin"
+        - name: MYSQL_PASSWORD
+          value: "mineadmin123"
+        volumeMounts:
+        - name: mysql-storage
+          mountPath: /var/lib/mysql
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: mysql-storage
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+  namespace: mineadmin
+spec:
+  selector:
+    app: mysql
+  ports:
+  - port: 3306
+    targetPort: 3306
+  type: ClusterIP
+EOF
+    
+    # 2. 部署Redis
+    print_info "部署Redis缓存..."
+    cat > "$k8s_dir/redis.yaml" << 'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: mineadmin
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: mineadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        command:
+        - redis-server
+        - --requirepass
+        - "root123"
+        volumeMounts:
+        - name: redis-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+      volumes:
+      - name: redis-storage
+        persistentVolumeClaim:
+          claimName: redis-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: mineadmin
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+EOF
+    
+    # 3. 部署MineAdmin后端
+    print_info "部署MineAdmin后端服务..."
+    cat > "$k8s_dir/server-app.yaml" << 'EOF'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mineadmin-server
   namespace: mineadmin
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: mineadmin-server
@@ -3502,13 +3740,40 @@ spec:
         image: mineadmin/server-app:latest
         ports:
         - containerPort: 9501
+          name: http
+        - containerPort: 9502
+          name: websocket
+        - containerPort: 9509
+          name: grpc
         env:
+        - name: APP_NAME
+          value: "MineAdmin"
         - name: APP_ENV
           value: "production"
+        - name: APP_DEBUG
+          value: "false"
+        - name: DB_DRIVER
+          value: "mysql"
         - name: DB_HOST
           value: "mysql-service"
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_DATABASE
+          value: "mineadmin"
+        - name: DB_USERNAME
+          value: "mineadmin"
+        - name: DB_PASSWORD
+          value: "mineadmin123"
         - name: REDIS_HOST
           value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_AUTH
+          value: "root123"
+        - name: REDIS_DB
+          value: "3"
+        - name: JWT_SECRET
+          value: "azOVxsOWt3r0ozZNz8Ss429ht0T8z6OpeIJAIwNp6X0xqrbEY2epfIWyxtC1qSNM8eD6/LQ/SahcQi2ByXa/2A=="
         resources:
           requests:
             memory: "512Mi"
@@ -3516,6 +3781,18 @@ spec:
           limits:
             memory: "1Gi"
             cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9501
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9501
+          initialDelaySeconds: 5
+          periodSeconds: 5
 ---
 apiVersion: v1
 kind: Service
@@ -3526,8 +3803,15 @@ spec:
   selector:
     app: mineadmin-server
   ports:
-  - port: 80
+  - name: http
+    port: 80
     targetPort: 9501
+  - name: websocket
+    port: 9502
+    targetPort: 9502
+  - name: grpc
+    port: 9509
+    targetPort: 9509
   type: ClusterIP
 ---
 apiVersion: networking.k8s.io/v1
@@ -3537,6 +3821,7 @@ metadata:
   namespace: mineadmin
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   rules:
   - host: mineadmin.local
@@ -3551,41 +3836,207 @@ spec:
               number: 80
 EOF
     
-    # 应用配置
-    kubectl apply -f "$k8s_dir/mineadmin-deployment.yaml"
+    # 4. 部署MineAdmin前端
+    print_info "部署MineAdmin前端服务..."
+    cat > "$k8s_dir/web.yaml" << 'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mineadmin-web
+  namespace: mineadmin
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mineadmin-web
+  template:
+    metadata:
+      labels:
+        app: mineadmin-web
+    spec:
+      containers:
+      - name: mineadmin-web
+        image: mineadmin/web-prod:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: VITE_API_URL
+          value: "http://mineadmin-server-service:80"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mineadmin-web-service
+  namespace: mineadmin
+spec:
+  selector:
+    app: mineadmin-web
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mineadmin-web-ingress
+  namespace: mineadmin
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: mineadmin.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mineadmin-web-service
+            port:
+              number: 80
+EOF
     
-    print_success "MineAdmin部署到K8s完成"
+    # 按顺序应用配置
+    print_info "应用K8s配置..."
+    kubectl apply -f "$k8s_dir/mysql.yaml"
+    kubectl apply -f "$k8s_dir/redis.yaml"
+    kubectl apply -f "$k8s_dir/server-app.yaml"
+    kubectl apply -f "$k8s_dir/web.yaml"
+    
+    print_success "MineAdmin完整栈部署到K8s完成"
 }
 
 # 验证K8s部署
 verify_k8s_deployment() {
     print_info "验证K8s部署..."
     
+    # 等待服务启动
+    print_info "等待服务启动..."
+    sleep 30
+    
     # 检查节点状态
-    echo -e "${WHITE}节点状态:${NC}"
-    kubectl get nodes
+    echo -e "${WHITE}📊 节点状态:${NC}"
+    kubectl get nodes -o wide
     
-    # 检查Pod状态
-    echo -e "${WHITE}Pod状态:${NC}"
-    kubectl get pods --all-namespaces
+    # 检查命名空间
+    echo -e "${WHITE}📁 命名空间:${NC}"
+    kubectl get namespaces
     
-    # 检查服务状态
-    echo -e "${WHITE}服务状态:${NC}"
-    kubectl get services --all-namespaces
+    # 检查MineAdmin命名空间中的Pod状态
+    echo -e "${WHITE}🐳 MineAdmin Pod状态:${NC}"
+    kubectl get pods -n mineadmin -o wide
+    
+    # 检查MineAdmin命名空间中的服务状态
+    echo -e "${WHITE}🔗 MineAdmin服务状态:${NC}"
+    kubectl get services -n mineadmin
+    
+    # 检查MineAdmin命名空间中的Ingress状态
+    echo -e "${WHITE}🌐 MineAdmin Ingress状态:${NC}"
+    kubectl get ingress -n mineadmin
+    
+    # 检查所有命名空间的Pod状态
+    echo -e "${WHITE}🐳 所有Pod状态:${NC}"
+    kubectl get pods --all-namespaces -o wide
+    
+    # 检查存储卷
+    echo -e "${WHITE}💾 存储卷状态:${NC}"
+    kubectl get pvc -n mineadmin
+    
+    # 检查事件
+    echo -e "${WHITE}📋 最近事件:${NC}"
+    kubectl get events -n mineadmin --sort-by='.lastTimestamp' | tail -10
+    
+    # 检查服务健康状态
+    print_info "检查服务健康状态..."
+    local mysql_pod=$(kubectl get pods -n mineadmin -l app=mysql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    local redis_pod=$(kubectl get pods -n mineadmin -l app=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    local server_pod=$(kubectl get pods -n mineadmin -l app=mineadmin-server -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    local web_pod=$(kubectl get pods -n mineadmin -l app=mineadmin-web -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    
+    if [ -n "$mysql_pod" ]; then
+        echo -e "${WHITE}🗄️  MySQL状态:${NC}"
+        kubectl describe pod "$mysql_pod" -n mineadmin | grep -E "(Status|Ready|Restart Count)"
+    fi
+    
+    if [ -n "$redis_pod" ]; then
+        echo -e "${WHITE}🔴 Redis状态:${NC}"
+        kubectl describe pod "$redis_pod" -n mineadmin | grep -E "(Status|Ready|Restart Count)"
+    fi
+    
+    if [ -n "$server_pod" ]; then
+        echo -e "${WHITE}⚙️  后端服务状态:${NC}"
+        kubectl describe pod "$server_pod" -n mineadmin | grep -E "(Status|Ready|Restart Count)"
+    fi
+    
+    if [ -n "$web_pod" ]; then
+        echo -e "${WHITE}🌐 前端服务状态:${NC}"
+        kubectl describe pod "$web_pod" -n mineadmin | grep -E "(Status|Ready|Restart Count)"
+    fi
     
     print_success "K8s部署验证完成"
 }
 
 # 显示K8s访问信息
 show_k8s_access_info() {
+    local node_ip=$(hostname -I | awk '{print $1}')
+    
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${WHITE}🎯 K8s集群访问信息:${NC}"
-    echo "集群状态: kubectl get nodes"
-    echo "Pod状态: kubectl get pods --all-namespaces"
-    echo "服务状态: kubectl get services --all-namespaces"
-    echo "MineAdmin访问: kubectl port-forward -n mineadmin svc/mineadmin-server-service 8080:80"
-    echo "然后访问: http://localhost:8080"
+    echo ""
+    echo -e "${YELLOW}📊 集群状态检查:${NC}"
+    echo "  kubectl get nodes"
+    echo "  kubectl get pods --all-namespaces"
+    echo "  kubectl get services --all-namespaces"
+    echo "  kubectl get ingress --all-namespaces"
+    echo ""
+    echo -e "${YELLOW}🌐 MineAdmin服务访问:${NC}"
+    echo "  后端API: kubectl port-forward -n mineadmin svc/mineadmin-server-service 8080:80"
+    echo "  前端Web: kubectl port-forward -n mineadmin svc/mineadmin-web-service 8081:80"
+    echo "  数据库: kubectl port-forward -n mineadmin svc/mysql-service 3306:3306"
+    echo "  Redis: kubectl port-forward -n mineadmin svc/redis-service 6379:6379"
+    echo ""
+    echo -e "${YELLOW}🔗 本地访问地址:${NC}"
+    echo "  后端API: http://localhost:8080"
+    echo "  前端Web: http://localhost:8081"
+    echo "  数据库: localhost:3306 (用户名: mineadmin, 密码: mineadmin123)"
+    echo "  Redis: localhost:6379 (密码: root123)"
+    echo ""
+    echo -e "${YELLOW}🌍 外部访问配置:${NC}"
+    echo "  节点IP: $node_ip"
+    echo "  如需外部访问，请配置Ingress或LoadBalancer"
+    echo "  或使用: kubectl expose deployment mineadmin-server --type=NodePort --port=80"
+    echo ""
+    echo -e "${YELLOW}📝 默认登录信息:${NC}"
+    echo "  用户名: admin"
+    echo "  密码: 123456"
+    echo ""
+    echo -e "${YELLOW}🔧 常用命令:${NC}"
+    echo "  查看Pod日志: kubectl logs -n mineadmin <pod-name>"
+    echo "  进入Pod: kubectl exec -it -n mineadmin <pod-name> -- /bin/bash"
+    echo "  重启服务: kubectl rollout restart deployment -n mineadmin mineadmin-server"
+    echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
@@ -3694,20 +4145,56 @@ show_k8s_status() {
         return 1
     fi
     
-    echo -e "${WHITE}节点状态:${NC}"
-    kubectl get nodes
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}🎯 K8s集群状态概览${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     
-    echo ""
-    echo -e "${WHITE}Pod状态:${NC}"
-    kubectl get pods --all-namespaces
+    # 集群信息
+    echo -e "${YELLOW}📊 集群信息:${NC}"
+    kubectl cluster-info 2>/dev/null || echo "集群信息获取失败"
     
-    echo ""
-    echo -e "${WHITE}服务状态:${NC}"
+    # 节点状态
+    echo -e "${YELLOW}🖥️  节点状态:${NC}"
+    kubectl get nodes -o wide
+    
+    # 命名空间
+    echo -e "${YELLOW}📁 命名空间:${NC}"
+    kubectl get namespaces
+    
+    # 系统Pod状态
+    echo -e "${YELLOW}⚙️  系统Pod状态:${NC}"
+    kubectl get pods -n kube-system -o wide
+    
+    # MineAdmin Pod状态
+    echo -e "${YELLOW}🐳 MineAdmin Pod状态:${NC}"
+    kubectl get pods -n mineadmin -o wide 2>/dev/null || echo "MineAdmin命名空间不存在"
+    
+    # 所有Pod状态
+    echo -e "${YELLOW}🐳 所有Pod状态:${NC}"
+    kubectl get pods --all-namespaces -o wide
+    
+    # 服务状态
+    echo -e "${YELLOW}🔗 服务状态:${NC}"
     kubectl get services --all-namespaces
     
-    echo ""
-    echo -e "${WHITE}命名空间:${NC}"
-    kubectl get namespaces
+    # Ingress状态
+    echo -e "${YELLOW}🌐 Ingress状态:${NC}"
+    kubectl get ingress --all-namespaces 2>/dev/null || echo "Ingress控制器未安装"
+    
+    # 存储卷状态
+    echo -e "${YELLOW}💾 存储卷状态:${NC}"
+    kubectl get pvc --all-namespaces 2>/dev/null || echo "无存储卷"
+    
+    # 资源使用情况
+    echo -e "${YELLOW}📈 资源使用情况:${NC}"
+    kubectl top nodes 2>/dev/null || echo "metrics-server未安装"
+    kubectl top pods --all-namespaces 2>/dev/null || echo "metrics-server未安装"
+    
+    # 最近事件
+    echo -e "${YELLOW}📋 最近事件:${NC}"
+    kubectl get events --all-namespaces --sort-by='.lastTimestamp' | tail -10
+    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # 查看K8s组件日志
@@ -3727,31 +4214,51 @@ show_k8s_logs() {
     echo "5. kube-proxy"
     echo "6. calico-node"
     echo "7. mineadmin-server"
+    echo "8. mineadmin-web"
+    echo "9. mysql"
+    echo "10. redis"
+    echo "11. 所有MineAdmin Pod"
+    echo "12. 所有系统Pod"
     echo ""
-    echo -e "${CYAN}请输入选择 (1-7):${NC}"
+    echo -e "${CYAN}请输入选择 (1-12):${NC}"
     read -r component_choice
     
     case $component_choice in
         1)
-            kubectl logs -n kube-system kube-apiserver-$(hostname)
+            kubectl logs -n kube-system kube-apiserver-$(hostname) --tail=100
             ;;
         2)
-            kubectl logs -n kube-system kube-controller-manager-$(hostname)
+            kubectl logs -n kube-system kube-controller-manager-$(hostname) --tail=100
             ;;
         3)
-            kubectl logs -n kube-system kube-scheduler-$(hostname)
+            kubectl logs -n kube-system kube-scheduler-$(hostname) --tail=100
             ;;
         4)
-            sudo journalctl -u kubelet -f
+            sudo journalctl -u kubelet -f --no-pager | tail -100
             ;;
         5)
-            kubectl logs -n kube-system kube-proxy-$(hostname)
+            kubectl logs -n kube-system kube-proxy-$(hostname) --tail=100
             ;;
         6)
-            kubectl logs -n kube-system -l k8s-app=calico-node
+            kubectl logs -n kube-system -l k8s-app=calico-node --tail=100
             ;;
         7)
-            kubectl logs -n mineadmin -l app=mineadmin-server
+            kubectl logs -n mineadmin -l app=mineadmin-server --tail=100
+            ;;
+        8)
+            kubectl logs -n mineadmin -l app=mineadmin-web --tail=100
+            ;;
+        9)
+            kubectl logs -n mineadmin -l app=mysql --tail=100
+            ;;
+        10)
+            kubectl logs -n mineadmin -l app=redis --tail=100
+            ;;
+        11)
+            kubectl logs -n mineadmin --all-containers=true --tail=50
+            ;;
+        12)
+            kubectl logs -n kube-system --all-containers=true --tail=50
             ;;
         *)
             print_info "取消查看日志"
@@ -3835,27 +4342,82 @@ restore_k8s_config() {
 uninstall_k8s_cluster() {
     print_info "卸载K8s集群..."
     
-    echo -e "${RED}警告: 此操作将完全删除K8s集群及其所有数据！${NC}"
+    echo -e "${RED}⚠️  警告: 此操作将完全删除K8s集群及其所有数据！${NC}"
+    echo -e "${YELLOW}包括:${NC}"
+    echo "  - 所有Pod、Service、Deployment"
+    echo "  - 所有命名空间和数据"
+    echo "  - 所有存储卷"
+    echo "  - K8s组件和配置"
+    echo ""
     read -p "确认要卸载K8s集群吗？(输入 'yes' 确认): " confirm
     
     if [[ "$confirm" == "yes" ]]; then
-        # 重置kubeadm
-        sudo kubeadm reset -f
+        print_info "开始卸载K8s集群..."
         
-        # 删除kubeconfig
-        rm -rf $HOME/.kube
+        # 1. 停止所有服务
+        print_info "停止K8s服务..."
+        sudo systemctl stop kubelet 2>/dev/null || true
+        sudo systemctl stop containerd 2>/dev/null || true
         
-        # 卸载K8s组件
-        sudo apt-get purge -y kubeadm kubectl kubelet kubernetes-cni kube*
-        sudo apt-get autoremove -y
+        # 2. 删除所有MineAdmin资源
+        if command -v kubectl &> /dev/null; then
+            print_info "删除MineAdmin资源..."
+            kubectl delete namespace mineadmin --ignore-not-found=true 2>/dev/null || true
+            kubectl delete namespace kube-system --ignore-not-found=true 2>/dev/null || true
+        fi
         
-        # 删除K8s相关文件
-        sudo rm -rf /etc/kubernetes/
-        sudo rm -rf ~/.kube/
-        sudo rm -rf /var/lib/kubelet/
-        sudo rm -rf /var/lib/etcd/
+        # 3. 重置kubeadm
+        print_info "重置kubeadm..."
+        sudo kubeadm reset -f 2>/dev/null || true
+        
+        # 4. 删除kubeconfig
+        print_info "删除kubeconfig..."
+        rm -rf $HOME/.kube 2>/dev/null || true
+        
+        # 5. 卸载K8s组件
+        print_info "卸载K8s组件..."
+        sudo apt-get purge -y kubeadm kubectl kubelet kubernetes-cni kube* 2>/dev/null || true
+        sudo apt-get autoremove -y 2>/dev/null || true
+        
+        # 6. 删除K8s相关文件和目录
+        print_info "删除K8s相关文件..."
+        sudo rm -rf /etc/kubernetes/ 2>/dev/null || true
+        sudo rm -rf ~/.kube/ 2>/dev/null || true
+        sudo rm -rf /var/lib/kubelet/ 2>/dev/null || true
+        sudo rm -rf /var/lib/etcd/ 2>/dev/null || true
+        sudo rm -rf /etc/cni/ 2>/dev/null || true
+        sudo rm -rf /opt/cni/ 2>/dev/null || true
+        sudo rm -rf /var/lib/cni/ 2>/dev/null || true
+        sudo rm -rf /var/run/kubernetes/ 2>/dev/null || true
+        
+        # 7. 删除systemd服务文件
+        print_info "删除systemd服务文件..."
+        sudo rm -f /etc/systemd/system/kubelet.service 2>/dev/null || true
+        sudo rm -rf /etc/systemd/system/kubelet.service.d/ 2>/dev/null || true
+        sudo systemctl daemon-reload 2>/dev/null || true
+        
+        # 8. 清理网络配置
+        print_info "清理网络配置..."
+        sudo ip link delete cni0 2>/dev/null || true
+        sudo ip link delete flannel.1 2>/dev/null || true
+        sudo ip link delete calico-* 2>/dev/null || true
+        
+        # 9. 清理iptables规则
+        print_info "清理iptables规则..."
+        sudo iptables -F 2>/dev/null || true
+        sudo iptables -t nat -F 2>/dev/null || true
+        sudo iptables -t mangle -F 2>/dev/null || true
+        sudo iptables -X 2>/dev/null || true
+        
+        # 10. 清理项目中的K8s文件
+        print_info "清理项目K8s文件..."
+        rm -rf "$PROJECT_ROOT/docker/k8s" 2>/dev/null || true
         
         print_success "K8s集群已完全卸载"
+        echo ""
+        echo -e "${YELLOW}💡 提示:${NC}"
+        echo "  - 如需重新安装，请运行: bash docker/mineadmin.sh k8s-deploy"
+        echo "  - 如需清理Docker镜像，请运行: docker system prune -a"
     else
         print_info "卸载已取消"
     fi
@@ -4523,6 +5085,9 @@ handle_hook_command() {
             ;;
         k8s-config)
             generate_k8s_config
+            ;;
+        k8s-diagnose)
+            diagnose_k8s_init
             ;;
         clean)
             clean_docker_cache
