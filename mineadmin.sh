@@ -236,6 +236,7 @@ show_command_menu() {
     echo -e "${MAGENTA}📦 容器管理:${NC}"
     echo "  ./docker/mineadmin.sh export   - 容器导出功能"
     echo "  ./docker/mineadmin.sh import   - 容器导入功能"
+    echo "  ./docker/mineadmin.sh import-history - 查看导入历史"
     echo "  ./docker/mineadmin.sh list-images - 查看导出镜像"
     echo "  ./docker/mineadmin.sh clean-images - 清理导出镜像"
     echo ""
@@ -303,6 +304,7 @@ command_mode_menu() {
     echo -e "${MAGENTA}📦 容器管理:${NC}"
     echo "  hook export   - 容器导出功能"
     echo "  hook import   - 容器导入功能"
+    echo "  hook import-history - 查看导入历史"
     echo "  hook list-images - 查看导出镜像"
     echo "  hook clean-images - 清理导出镜像"
     echo ""
@@ -1925,6 +1927,59 @@ export_containers() {
     fi
 }
 
+# 检查镜像冲突
+check_image_conflicts() {
+    local file_path="$1"
+    local conflicts=()
+    
+    # 获取tar文件中的镜像信息
+    local tar_images=()
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^Loaded\ image:\ (.+)$ ]]; then
+            local image_name="${BASH_REMATCH[1]}"
+            tar_images+=("$image_name")
+        fi
+    done < <(docker load -i "$file_path" 2>&1 | grep "Loaded image:")
+    
+    # 检查每个镜像是否已存在
+    for img in "${tar_images[@]}"; do
+        if docker images "$img" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -q "$img"; then
+            conflicts+=("$img")
+        fi
+    done
+    
+    echo "${conflicts[@]}"
+}
+
+# 记录镜像导入历史
+record_import_history() {
+    local imported_images=("$@")
+    local history_file="$PROJECT_ROOT/docker/images/import_history.log"
+    
+    if [ ${#imported_images[@]} -gt 0 ]; then
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        echo "[$timestamp] 导入镜像: ${imported_images[*]}" >> "$history_file"
+    fi
+}
+
+# 查看镜像导入历史
+show_import_history() {
+    local history_file="$PROJECT_ROOT/docker/images/import_history.log"
+    
+    if [ ! -f "$history_file" ]; then
+        print_info "暂无导入历史记录"
+        return
+    fi
+    
+    echo -e "${WHITE}镜像导入历史记录:${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    tail -20 "$history_file" | while read -r line; do
+        echo "  $line"
+    done
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
 # 容器导入功能
 import_containers() {
     print_info "容器导入功能"
@@ -1940,13 +1995,16 @@ import_containers() {
     # 获取可导入的镜像文件
     local image_files=()
     local file_paths=()
+    local file_sizes=()
     
     while IFS= read -r -d '' file; do
         if [[ "$file" == *.tar ]]; then
             local filename=$(basename "$file")
             local filesize=$(du -h "$file" | cut -f1)
-            image_files+=("$filename ($filesize)")
+            local filesize_bytes=$(du -b "$file" | cut -f1)
+            image_files+=("$filename")
             file_paths+=("$file")
+            file_sizes+=("$filesize")
         fi
     done < <(find "$images_dir" -name "*.tar" -print0 2>/dev/null)
     
@@ -1956,26 +2014,114 @@ import_containers() {
         return 1
     fi
     
-    # 创建临时文件存储选择
-    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_import$$
+    # 显示可导入的文件列表
+    echo -e "${WHITE}可导入的镜像文件:${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "%-4s %-50s %-15s %s\n" "序号" "文件名" "大小" "路径"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     
-    # 构建文件选择菜单选项（支持多选）
-    local menu_options=""
     for i in "${!image_files[@]}"; do
-        menu_options="$menu_options \"${image_files[$i]}\" \"\" off"
+        printf "%-4s %-50s %-15s %s\n" "$((i+1))" "${image_files[$i]}" "${file_sizes[$i]}" "$(dirname "${file_paths[$i]}")"
     done
     
-    # 显示文件选择菜单
-    eval dialog --title "Select Images to Import" \
-         --backtitle "MineAdmin Management Tool" \
-         --checklist "Please select image files to import (space to select, enter to confirm):" 20 80 15 $menu_options 2> "$tempfile"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
     
-    # 读取选择结果
-    local selected_files=$(cat "$tempfile" 2>/dev/null)
-    rm -f "$tempfile"
+    # 提供导入选项
+    echo -e "${WHITE}导入选项:${NC}"
+    echo "1. 选择性导入 - 手动选择要导入的文件"
+    echo "2. 批量导入 - 导入所有文件"
+    echo "3. 智能导入 - 只导入MineAdmin相关镜像"
+    echo ""
+    echo -e "${CYAN}请选择导入模式 (1-3):${NC}"
+    read -r import_mode
     
-    if [ -z "$selected_files" ]; then
-        print_info "取消容器导入"
+    case $import_mode in
+        1)
+            # 选择性导入 - 继续原有的dialog选择
+            ;;
+        2)
+            # 批量导入 - 选择所有文件
+            selected_files=()
+            for i in "${!image_files[@]}"; do
+                local display_name="${image_files[$i]} (${file_sizes[$i]})"
+                selected_files+=("$display_name")
+            done
+            print_info "已选择所有文件进行批量导入"
+            ;;
+        3)
+            # 智能导入 - 只导入MineAdmin相关镜像
+            selected_files=()
+            for i in "${!image_files[@]}"; do
+                if [[ "${image_files[$i]}" =~ mineadmin ]]; then
+                    local display_name="${image_files[$i]} (${file_sizes[$i]})"
+                    selected_files+=("$display_name")
+                fi
+            done
+            if [ ${#selected_files[@]} -eq 0 ]; then
+                print_warning "未找到MineAdmin相关镜像文件"
+                print_info "切换到选择性导入模式"
+            else
+                print_info "已选择MineAdmin相关镜像进行智能导入"
+            fi
+            ;;
+        *)
+            print_info "使用默认的选择性导入模式"
+            ;;
+    esac
+    
+    # 如果没有预选文件，则使用dialog选择
+    if [ ${#selected_files[@]} -eq 0 ]; then
+        # 创建临时文件存储选择
+        local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_import$$
+        
+        # 构建文件选择菜单选项（支持多选）
+        local menu_options=()
+        for i in "${!image_files[@]}"; do
+            local display_name="${image_files[$i]} (${file_sizes[$i]})"
+            menu_options+=("$display_name" "" "off")
+        done
+        
+        # 显示文件选择菜单
+        dialog --title "选择要导入的镜像文件" \
+               --backtitle "MineAdmin 管理工具" \
+               --checklist "请选择要导入的镜像文件（空格选择，回车确认）：" 20 80 15 \
+               "${menu_options[@]}" 2> "$tempfile"
+        
+        # 读取选择结果
+        local dialog_result=$(cat "$tempfile" 2>/dev/null)
+        rm -f "$tempfile"
+        
+        if [ -z "$dialog_result" ]; then
+            print_info "取消容器导入"
+            return
+        fi
+        
+        # 将dialog结果转换为数组
+        selected_files=()
+        while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+                selected_files+=("$line")
+            fi
+        done <<< "$dialog_result"
+    fi
+    
+    # 显示导入预览
+    print_info "导入预览 - 将要导入的镜像文件:"
+    echo ""
+    local preview_count=0
+    for file_display in "${selected_files[@]}"; do
+        preview_count=$((preview_count + 1))
+        echo -e "${BLUE}[$preview_count]${NC} $file_display"
+    done
+    echo ""
+    
+    # 确认导入
+    echo -e "${YELLOW}确认导入以上 $preview_count 个镜像文件？(y/N):${NC}"
+    read -r confirm_import
+    if [[ ! "$confirm_import" =~ ^[Yy]$ ]]; then
+        print_info "取消导入操作"
         return
     fi
     
@@ -1985,15 +2131,20 @@ import_containers() {
     
     local import_count=0
     local success_count=0
+    local imported_images=()
+    local failed_files=()
     
-    for file_display in $selected_files; do
+    for file_display in "${selected_files[@]}"; do
         import_count=$((import_count + 1))
         
         # 找到对应的文件路径
         local file_path=""
+        local file_index=-1
         for i in "${!image_files[@]}"; do
-            if [[ "${image_files[$i]}" == "$file_display" ]]; then
+            local display_name="${image_files[$i]} (${file_sizes[$i]})"
+            if [[ "$display_name" == "$file_display" ]]; then
                 file_path="${file_paths[$i]}"
+                file_index=$i
                 break
             fi
         done
@@ -2003,15 +2154,54 @@ import_containers() {
             continue
         fi
         
-        echo -e "${BLUE}[$import_count] 导入:${NC} $file_display"
+        echo -e "${BLUE}[$import_count] 导入:${NC} ${image_files[$file_index]}"
         echo -e "${WHITE}文件:${NC} $file_path"
+        echo -e "${WHITE}大小:${NC} ${file_sizes[$file_index]}"
+        
+        # 检查文件完整性
+        print_info "检查文件完整性..."
+        if ! tar -tf "$file_path" > /dev/null 2>&1; then
+            print_error "文件损坏或格式不正确"
+            continue
+        fi
+        
+        # 获取导入前的镜像列表
+        local before_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null)
         
         # 执行导入
-        if docker load -i "$file_path" 2>/dev/null; then
-            print_success "导入成功"
-            success_count=$((success_count + 1))
+        print_info "正在导入镜像..."
+        local import_output=$(docker load -i "$file_path" 2>&1)
+        local import_result=$?
+        
+        if [ $import_result -eq 0 ]; then
+            # 获取导入后的镜像列表
+            local after_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null)
+            
+            # 找出新导入的镜像
+            local new_images=()
+            while IFS= read -r image; do
+                if [[ -n "$image" && ! "$before_images" =~ "$image" ]]; then
+                    new_images+=("$image")
+                fi
+            done <<< "$after_images"
+            
+            if [ ${#new_images[@]} -gt 0 ]; then
+                print_success "导入成功"
+                echo -e "${WHITE}导入的镜像:${NC}"
+                for img in "${new_images[@]}"; do
+                    echo "  ✅ $img"
+                    imported_images+=("$img")
+                done
+                success_count=$((success_count + 1))
+            else
+                print_warning "导入完成但未检测到新镜像"
+                echo -e "${WHITE}导入输出:${NC} $import_output"
+                failed_files+=("${image_files[$file_index]} - 未检测到新镜像")
+            fi
         else
             print_error "导入失败"
+            echo -e "${WHITE}错误信息:${NC} $import_output"
+            failed_files+=("${image_files[$file_index]} - 导入失败")
         fi
         
         echo ""
@@ -2020,21 +2210,121 @@ import_containers() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     print_success "容器导入完成！"
     echo -e "${WHITE}成功导入:${NC} $success_count/$import_count"
+    
+    # 显示失败的文件
+    if [ ${#failed_files[@]} -gt 0 ]; then
+        echo -e "${WHITE}失败的文件:${NC} ${#failed_files[@]} 个"
+        for failed in "${failed_files[@]}"; do
+            echo "  ❌ $failed"
+        done
+    fi
     echo ""
+    
+    # 显示导入的镜像信息
+    if [ ${#imported_images[@]} -gt 0 ]; then
+        echo -e "${WHITE}导入的镜像列表:${NC}"
+        echo ""
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        printf "%-50s %-15s %-20s %s\n" "镜像名称" "大小" "创建时间" "ID"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        
+        for img in "${imported_images[@]}"; do
+            local img_info=$(docker images "$img" --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}" 2>/dev/null | tail -n +2)
+            if [[ -n "$img_info" ]]; then
+                printf "%-50s %-15s %-20s %s\n" $img_info
+            else
+                printf "%-50s %-15s %-20s %s\n" "$img" "未知" "未知" "未知"
+            fi
+        done
+        
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+    fi
+    
+    # 检查是否有MineAdmin相关镜像
+    local mineadmin_images=()
+    for img in "${imported_images[@]}"; do
+        if [[ "$img" =~ mineadmin ]]; then
+            mineadmin_images+=("$img")
+        fi
+    done
+    
+    # 记录导入历史
+    if [ ${#imported_images[@]} -gt 0 ]; then
+        record_import_history "${imported_images[@]}"
+    fi
     
     # 询问是否启动服务
     if [ $success_count -gt 0 ]; then
-        dialog --title "Start Services" \
-               --backtitle "MineAdmin Management Tool" \
-               --yesno "Image import completed. Do you want to start MineAdmin services now?" 8 60
-        
-        if [ $? -eq 0 ]; then
-            print_info "正在启动MineAdmin服务..."
-            start_services
+        if [ ${#mineadmin_images[@]} -gt 0 ]; then
+            echo -e "${WHITE}检测到MineAdmin相关镜像:${NC}"
+            for img in "${mineadmin_images[@]}"; do
+                echo "  🎯 $img"
+            done
+            echo ""
+            
+            dialog --title "启动MineAdmin服务" \
+                   --backtitle "MineAdmin 管理工具" \
+                   --yesno "镜像导入完成，是否立即启动MineAdmin服务？\n\n检测到MineAdmin相关镜像，建议启动服务进行验证。" 10 70
+            
+            if [ $? -eq 0 ]; then
+                print_info "正在启动MineAdmin服务..."
+                start_services
+            else
+                print_info "您可以稍后使用 'hook start' 命令启动服务"
+            fi
         else
-            print_info "您可以稍后使用 'hook start' 命令启动服务"
+            dialog --title "镜像导入完成" \
+                   --backtitle "MineAdmin 管理工具" \
+                   --yesno "镜像导入完成，是否启动MineAdmin服务？\n\n注意：导入的镜像可能不是MineAdmin相关镜像。" 8 70
+            
+            if [ $? -eq 0 ]; then
+                print_info "正在启动MineAdmin服务..."
+                start_services
+            else
+                print_info "您可以稍后使用 'hook start' 命令启动服务"
+            fi
         fi
     fi
+    
+    # 镜像导入验证
+    if [ ${#imported_images[@]} -gt 0 ]; then
+        echo -e "${WHITE}🔍 镜像导入验证:${NC}"
+        echo ""
+        
+        local valid_count=0
+        for img in "${imported_images[@]}"; do
+            echo -e "${BLUE}验证镜像:${NC} $img"
+            
+            # 检查镜像是否存在
+            if docker images "$img" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -q "$img"; then
+                # 检查镜像是否可以正常拉取信息
+                if docker inspect "$img" > /dev/null 2>&1; then
+                    print_success "镜像验证通过"
+                    valid_count=$((valid_count + 1))
+                else
+                    print_warning "镜像存在但无法获取详细信息"
+                fi
+            else
+                print_error "镜像验证失败 - 镜像不存在"
+            fi
+            echo ""
+        done
+        
+        echo -e "${WHITE}验证结果:${NC} $valid_count/${#imported_images[@]} 个镜像验证通过"
+        echo ""
+    fi
+    
+    # 提供后续操作建议
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}💡 后续操作建议:${NC}"
+    echo "1. 使用 'hook status' 查看服务状态"
+    echo "2. 使用 'hook logs' 查看容器日志"
+    echo "3. 使用 'docker images' 查看所有镜像"
+    echo "4. 使用 'hook start' 启动所有服务"
+    echo "5. 使用 'docker run --rm <镜像名> --help' 测试镜像"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # 查看导出的镜像文件
@@ -2210,6 +2500,7 @@ show_help() {
     echo -e "${BLUE}📦 容器管理:${NC}"
     echo "- 容器导出功能: hook export"
     echo "- 容器导入功能: hook import"
+    echo "- 查看导入历史: hook import-history"
     echo "- 查看导出镜像: hook list-images"
     echo "- 清理导出镜像: hook clean-images"
     echo ""
@@ -2309,6 +2600,9 @@ handle_hook_command() {
             ;;
         import)
             import_containers
+            ;;
+        import-history)
+            show_import_history
             ;;
         list-images)
             list_exported_images
