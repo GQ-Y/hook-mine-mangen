@@ -183,11 +183,15 @@ dialog_main_menu() {
            15 "查看已安装插件" \
            16 "设置开机自启动" \
            17 "清理Docker缓存" \
-           18 "完全卸载" \
-           19 "安装全局命令" \
-           20 "卸载全局命令" \
-           21 "检查命令状态" \
-           22 "查看帮助" \
+           18 "容器导出功能" \
+           19 "容器导入功能" \
+           20 "查看导出镜像" \
+           21 "清理导出镜像" \
+           22 "完全卸载" \
+           23 "安装全局命令" \
+           24 "卸载全局命令" \
+           25 "检查命令状态" \
+           26 "查看帮助" \
            0 "退出" 2> "$tempfile"
     
     # 读取选择结果
@@ -228,6 +232,12 @@ show_command_menu() {
     echo "  ./docker/mineadmin.sh password - 修改密码"
     echo "  ./docker/mineadmin.sh info     - 查看配置信息"
     echo "  ./docker/mineadmin.sh plugins  - 查看已安装插件"
+    echo ""
+    echo -e "${MAGENTA}📦 容器管理:${NC}"
+    echo "  ./docker/mineadmin.sh export   - 容器导出功能"
+    echo "  ./docker/mineadmin.sh import   - 容器导入功能"
+    echo "  ./docker/mineadmin.sh list-images - 查看导出镜像"
+    echo "  ./docker/mineadmin.sh clean-images - 清理导出镜像"
     echo ""
     echo -e "${MAGENTA}🧹 清理维护:${NC}"
     echo "  ./docker/mineadmin.sh clean    - 清理Docker缓存"
@@ -289,6 +299,12 @@ command_mode_menu() {
     echo "  hook password - 修改密码"
     echo "  hook info     - 查看配置信息"
     echo "  hook plugins  - 查看已安装插件"
+    echo ""
+    echo -e "${MAGENTA}📦 容器管理:${NC}"
+    echo "  hook export   - 容器导出功能"
+    echo "  hook import   - 容器导入功能"
+    echo "  hook list-images - 查看导出镜像"
+    echo "  hook clean-images - 清理导出镜像"
     echo ""
     echo -e "${MAGENTA}🧹 清理维护:${NC}"
     echo "  hook clean    - 清理Docker缓存"
@@ -1768,6 +1784,400 @@ ask_install_plugins() {
     fi
 }
 
+# 容器导出功能
+export_containers() {
+    print_info "容器导出功能"
+    
+    # 创建images目录
+    local images_dir="$PROJECT_ROOT/docker/images"
+    if [ ! -d "$images_dir" ]; then
+        mkdir -p "$images_dir"
+        print_success "创建images目录: $images_dir"
+    fi
+    
+    # 获取当前运行的容器和镜像
+    local running_containers=()
+    local container_ids=()
+    
+    # 获取docker-compose项目中的镜像
+    cd "$PROJECT_ROOT"
+    print_info "获取MineAdmin项目镜像..."
+    
+    # 获取docker-compose服务使用的镜像
+    local compose_images=()
+    print_info "正在获取docker-compose镜像列表..."
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            compose_images+=("$line")
+            print_info "找到镜像: $line"
+        fi
+    done < <(docker-compose -f docker/docker-compose.yml config --images 2>/dev/null)
+    
+    print_info "找到 ${#compose_images[@]} 个compose镜像"
+    
+    # 如果没有找到compose镜像，获取所有Docker镜像
+    if [ ${#compose_images[@]} -eq 0 ]; then
+        print_info "未找到compose镜像，显示所有可用镜像..."
+        
+        while IFS= read -r line; do
+            if [[ $line =~ ^[a-zA-Z0-9]+ ]]; then
+                local image_id=$(echo "$line" | awk '{print $3}')
+                local image_name=$(echo "$line" | awk '{print $1 ":" $2}')
+                
+                if [[ -n "$image_id" && -n "$image_name" && "$image_name" != "<none>:<none>" ]]; then
+                    running_containers+=("$image_name")
+                    container_ids+=("$image_name")
+                fi
+            fi
+        done < <(docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}" | tail -n +2)
+    else
+        # 使用compose镜像
+        for image in "${compose_images[@]}"; do
+            if [[ -n "$image" ]]; then
+                running_containers+=("$image")
+                container_ids+=("$image")
+            fi
+        done
+    fi
+    
+    if [ ${#running_containers[@]} -eq 0 ]; then
+        print_error "未找到可导出的容器或镜像"
+        return 1
+    fi
+    
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_export$$
+    
+    # 显示容器选择菜单
+    dialog --title "Select Containers to Export" \
+           --backtitle "MineAdmin Management Tool" \
+           --checklist "Please select containers to export (space to select, enter to confirm):" 20 80 15 \
+           "${running_containers[0]}" "" off \
+           "${running_containers[1]}" "" off \
+           "${running_containers[2]}" "" off \
+           "${running_containers[3]}" "" off 2> "$tempfile"
+    
+    # 读取选择结果
+    local selected_containers=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -z "$selected_containers" ]; then
+        print_info "取消容器导出"
+        return
+    fi
+    
+    # 显示导出进度
+    print_info "开始导出选中的容器..."
+    echo ""
+    
+    local export_count=0
+    local success_count=0
+    
+    for container in $selected_containers; do
+        export_count=$((export_count + 1))
+        
+        # 找到对应的镜像名称
+        local image_name=""
+        for i in "${!running_containers[@]}"; do
+            if [[ "${running_containers[$i]}" == "$container" ]]; then
+                image_name="${container_ids[$i]}"
+                break
+            fi
+        done
+        
+        if [ -z "$image_name" ]; then
+            print_error "未找到镜像名称: $container"
+            continue
+        fi
+        
+        # 生成导出文件名
+        local timestamp=$(date +"%Y%m%d_%H%M%S")
+        local safe_name=$(echo "$container" | sed 's/[^a-zA-Z0-9._-]//g' | sed 's/[:]/_/g')
+        local export_file="$images_dir/${safe_name}_${timestamp}.tar"
+        
+        echo -e "${BLUE}[$export_count] 导出:${NC} $container"
+        echo -e "${WHITE}文件:${NC} $export_file"
+        
+        # 执行导出
+        if docker save -o "$export_file" "$image_name" 2>/dev/null; then
+            local file_size=$(du -h "$export_file" | cut -f1)
+            print_success "导出成功: $file_size"
+            success_count=$((success_count + 1))
+        else
+            print_error "导出失败"
+        fi
+        
+        echo ""
+    done
+    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    print_success "容器导出完成！"
+    echo -e "${WHITE}导出目录:${NC} $images_dir"
+    echo -e "${WHITE}成功导出:${NC} $success_count/$export_count"
+    echo ""
+    
+    # 显示导出的文件列表
+    if [ $success_count -gt 0 ]; then
+        echo -e "${WHITE}导出的文件:${NC}"
+        ls -lh "$images_dir"/*.tar 2>/dev/null | while read -r line; do
+            echo "  $line"
+        done
+    fi
+}
+
+# 容器导入功能
+import_containers() {
+    print_info "容器导入功能"
+    
+    # 检查images目录
+    local images_dir="$PROJECT_ROOT/docker/images"
+    if [ ! -d "$images_dir" ]; then
+        print_error "images目录不存在: $images_dir"
+        print_info "请先导出一些容器镜像"
+        return 1
+    fi
+    
+    # 获取可导入的镜像文件
+    local image_files=()
+    local file_paths=()
+    
+    while IFS= read -r -d '' file; do
+        if [[ "$file" == *.tar ]]; then
+            local filename=$(basename "$file")
+            local filesize=$(du -h "$file" | cut -f1)
+            image_files+=("$filename ($filesize)")
+            file_paths+=("$file")
+        fi
+    done < <(find "$images_dir" -name "*.tar" -print0 2>/dev/null)
+    
+    if [ ${#image_files[@]} -eq 0 ]; then
+        print_error "未找到可导入的镜像文件"
+        print_info "请先导出一些容器镜像到: $images_dir"
+        return 1
+    fi
+    
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_import$$
+    
+    # 构建文件选择菜单选项（支持多选）
+    local menu_options=""
+    for i in "${!image_files[@]}"; do
+        menu_options="$menu_options \"${image_files[$i]}\" \"\" off"
+    done
+    
+    # 显示文件选择菜单
+    eval dialog --title "Select Images to Import" \
+         --backtitle "MineAdmin Management Tool" \
+         --checklist "Please select image files to import (space to select, enter to confirm):" 20 80 15 $menu_options 2> "$tempfile"
+    
+    # 读取选择结果
+    local selected_files=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -z "$selected_files" ]; then
+        print_info "取消容器导入"
+        return
+    fi
+    
+    # 显示导入进度
+    print_info "开始导入选中的镜像文件..."
+    echo ""
+    
+    local import_count=0
+    local success_count=0
+    
+    for file_display in $selected_files; do
+        import_count=$((import_count + 1))
+        
+        # 找到对应的文件路径
+        local file_path=""
+        for i in "${!image_files[@]}"; do
+            if [[ "${image_files[$i]}" == "$file_display" ]]; then
+                file_path="${file_paths[$i]}"
+                break
+            fi
+        done
+        
+        if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+            print_error "未找到文件: $file_display"
+            continue
+        fi
+        
+        echo -e "${BLUE}[$import_count] 导入:${NC} $file_display"
+        echo -e "${WHITE}文件:${NC} $file_path"
+        
+        # 执行导入
+        if docker load -i "$file_path" 2>/dev/null; then
+            print_success "导入成功"
+            success_count=$((success_count + 1))
+        else
+            print_error "导入失败"
+        fi
+        
+        echo ""
+    done
+    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    print_success "容器导入完成！"
+    echo -e "${WHITE}成功导入:${NC} $success_count/$import_count"
+    echo ""
+    
+    # 询问是否启动服务
+    if [ $success_count -gt 0 ]; then
+        dialog --title "Start Services" \
+               --backtitle "MineAdmin Management Tool" \
+               --yesno "Image import completed. Do you want to start MineAdmin services now?" 8 60
+        
+        if [ $? -eq 0 ]; then
+            print_info "正在启动MineAdmin服务..."
+            start_services
+        else
+            print_info "您可以稍后使用 'hook start' 命令启动服务"
+        fi
+    fi
+}
+
+# 查看导出的镜像文件
+list_exported_images() {
+    print_info "查看导出的镜像文件"
+    
+    local images_dir="$PROJECT_ROOT/docker/images"
+    if [ ! -d "$images_dir" ]; then
+        print_error "images目录不存在: $images_dir"
+        return 1
+    fi
+    
+    local image_files=($(find "$images_dir" -name "*.tar" -type f 2>/dev/null))
+    
+    if [ ${#image_files[@]} -eq 0 ]; then
+        print_info "未找到导出的镜像文件"
+        return 0
+    fi
+    
+    echo -e "${WHITE}导出的镜像文件列表:${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "%-50s %-15s %-20s %s\n" "文件名" "大小" "修改时间" "路径"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    
+    for file in "${image_files[@]}"; do
+        local filename=$(basename "$file")
+        local filesize=$(du -h "$file" | cut -f1)
+        # 检测系统类型，使用不同的stat参数
+        local modtime=""
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS
+            modtime=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$file" 2>/dev/null)
+        else
+            # Linux
+            modtime=$(stat -c "%y" "$file" 2>/dev/null | cut -d' ' -f1,2 | cut -d'.' -f1)
+        fi
+        local filepath=$(dirname "$file")
+        
+        printf "%-50s %-15s %-20s %s\n" "$filename" "$filesize" "$modtime" "$filepath"
+    done
+    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${WHITE}总计:${NC} ${#image_files[@]} 个文件"
+    
+    # 计算总大小
+    local total_size=$(du -sh "$images_dir" 2>/dev/null | cut -f1)
+    echo -e "${WHITE}总大小:${NC} $total_size"
+}
+
+# 清理导出的镜像文件
+clean_exported_images() {
+    print_info "清理导出的镜像文件"
+    
+    local images_dir="$PROJECT_ROOT/docker/images"
+    if [ ! -d "$images_dir" ]; then
+        print_error "images目录不存在: $images_dir"
+        return 1
+    fi
+    
+    local image_files=($(find "$images_dir" -name "*.tar" -type f 2>/dev/null))
+    
+    if [ ${#image_files[@]} -eq 0 ]; then
+        print_info "未找到可清理的镜像文件"
+        return 0
+    fi
+    
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_clean_images$$
+    
+    # 构建文件选择菜单选项（支持多选）
+    local menu_options=""
+    for file in "${image_files[@]}"; do
+        local filename=$(basename "$file")
+        local filesize=$(du -h "$file" | cut -f1)
+        menu_options="$menu_options \"$filename ($filesize)\" \"\" off"
+    done
+    
+    # 显示文件选择菜单
+    eval dialog --title "Select Images to Clean" \
+         --backtitle "MineAdmin Management Tool" \
+         --checklist "Please select image files to clean (space to select, enter to confirm):" 20 80 15 $menu_options 2> "$tempfile"
+    
+    # 读取选择结果
+    local selected_files=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -z "$selected_files" ]; then
+        print_info "取消清理操作"
+        return
+    fi
+    
+    # 确认删除
+    dialog --title "Confirm Delete" \
+           --backtitle "MineAdmin Management Tool" \
+           --yesno "Are you sure you want to delete the selected image files?\n\nThis action cannot be undone!" 8 60
+    
+    if [ $? -ne 0 ]; then
+        print_info "取消删除操作"
+        return
+    fi
+    
+    # 执行删除
+    local delete_count=0
+    local success_count=0
+    
+    for file_display in $selected_files; do
+        delete_count=$((delete_count + 1))
+        
+        # 找到对应的文件路径
+        local file_path=""
+        for file in "${image_files[@]}"; do
+            local filename=$(basename "$file")
+            local filesize=$(du -h "$file" | cut -f1)
+            local display_name="$filename ($filesize)"
+            
+            if [[ "$display_name" == "$file_display" ]]; then
+                file_path="$file"
+                break
+            fi
+        done
+        
+        if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
+            print_error "未找到文件: $file_display"
+            continue
+        fi
+        
+        echo -e "${BLUE}[$delete_count] 删除:${NC} $(basename "$file_path")"
+        
+        if rm -f "$file_path"; then
+            print_success "删除成功"
+            success_count=$((success_count + 1))
+        else
+            print_error "删除失败"
+        fi
+    done
+    
+    echo ""
+    print_success "清理完成！"
+    echo -e "${WHITE}成功删除:${NC} $success_count/$delete_count"
+}
+
 # 显示帮助信息
 show_help() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1796,6 +2206,12 @@ show_help() {
     echo "- 查看配置信息: hook info"
     echo "- 查看已安装插件: hook plugins"
     echo "- 查看网络连接: hook network"
+    echo ""
+    echo -e "${BLUE}📦 容器管理:${NC}"
+    echo "- 容器导出功能: hook export"
+    echo "- 容器导入功能: hook import"
+    echo "- 查看导出镜像: hook list-images"
+    echo "- 清理导出镜像: hook clean-images"
     echo ""
     echo -e "${BLUE}🧹 清理维护:${NC}"
     echo "- 清理Docker缓存: hook clean"
@@ -1887,6 +2303,18 @@ handle_hook_command() {
             ;;
         autostart)
             setup_autostart
+            ;;
+        export)
+            export_containers
+            ;;
+        import)
+            import_containers
+            ;;
+        list-images)
+            list_exported_images
+            ;;
+        clean-images)
+            clean_exported_images
             ;;
         clean)
             clean_docker_cache
