@@ -276,25 +276,36 @@ show_command_menu() {
     echo -e "${WHITE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     echo ""
     
+    echo -e "${PURPLE}☸️  K8s集群管理${NC}"
+    echo -e "${CYAN}[22]${NC} ${WHITE}./docker/mineadmin.sh k8s${NC}         ${GREEN}▶${NC} ${YELLOW}K8s集群管理菜单${NC}"
+    echo -e "${CYAN}[23]${NC} ${WHITE}./docker/mineadmin.sh k8s-deploy${NC}  ${GREEN}▶${NC} ${YELLOW}部署K8s集群${NC}"
+    echo -e "${CYAN}[24]${NC} ${WHITE}./docker/mineadmin.sh k8s-status${NC}  ${GREEN}▶${NC} ${YELLOW}查看集群状态${NC}"
+    echo -e "${CYAN}[25]${NC} ${WHITE}./docker/mineadmin.sh k8s-logs${NC}    ${GREEN}▶${NC} ${YELLOW}查看组件日志${NC}"
+    echo -e "${CYAN}[26]${NC} ${WHITE}./docker/mineadmin.sh k8s-config${NC}  ${GREEN}▶${NC} ${YELLOW}生成配置文件${NC}"
+    echo ""
+    
+    echo -e "${WHITE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
     echo -e "${RED}🚀 项目初始化${NC}"
-    echo -e "${CYAN}[22]${NC} ${WHITE}./docker/mineadmin.sh init${NC}     ${GREEN}▶${NC} ${YELLOW}从官方仓库初始化项目${NC}"
+    echo -e "${CYAN}[27]${NC} ${WHITE}./docker/mineadmin.sh init${NC}     ${GREEN}▶${NC} ${YELLOW}从官方仓库初始化项目${NC}"
     echo ""
     
     echo -e "${WHITE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     echo ""
     
     echo -e "${WHITE}🧹 维护清理${NC}"
-    echo -e "${CYAN}[23]${NC} ${WHITE}./docker/mineadmin.sh clean${NC}    ${GREEN}▶${NC} ${YELLOW}Docker缓存清理${NC}"
-    echo -e "${CYAN}[24]${NC} ${WHITE}./docker/mineadmin.sh uninstall${NC}${GREEN}▶${NC} ${YELLOW}完全卸载${NC}"
+    echo -e "${CYAN}[28]${NC} ${WHITE}./docker/mineadmin.sh clean${NC}    ${GREEN}▶${NC} ${YELLOW}Docker缓存清理${NC}"
+    echo -e "${CYAN}[29]${NC} ${WHITE}./docker/mineadmin.sh uninstall${NC}${GREEN}▶${NC} ${YELLOW}完全卸载${NC}"
     echo ""
     
     echo -e "${WHITE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
     echo ""
     
     echo -e "${CYAN}🌐 全局命令${NC}"
-    echo -e "${CYAN}[25]${NC} ${WHITE}./docker/mineadmin.sh setup${NC}    ${GREEN}▶${NC} ${YELLOW}安装全局命令${NC}"
-    echo -e "${CYAN}[26]${NC} ${WHITE}./docker/mineadmin.sh remove${NC}   ${GREEN}▶${NC} ${YELLOW}卸载全局命令${NC}"
-    echo -e "${CYAN}[27]${NC} ${WHITE}./docker/mineadmin.sh test${NC}     ${GREEN}▶${NC} ${YELLOW}检查命令状态${NC}"
+    echo -e "${CYAN}[30]${NC} ${WHITE}./docker/mineadmin.sh setup${NC}    ${GREEN}▶${NC} ${YELLOW}安装全局命令${NC}"
+    echo -e "${CYAN}[31]${NC} ${WHITE}./docker/mineadmin.sh remove${NC}   ${GREEN}▶${NC} ${YELLOW}卸载全局命令${NC}"
+    echo -e "${CYAN}[32]${NC} ${WHITE}./docker/mineadmin.sh test${NC}     ${GREEN}▶${NC} ${YELLOW}检查命令状态${NC}"
     echo ""
     
     echo -e "${WHITE}─────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
@@ -387,6 +398,13 @@ command_mode_menu() {
     echo "  hook import-history - 查看导入历史"
     echo "  hook list-images - 查看导出镜像"
     echo "  hook clean-images - 清理导出镜像"
+    echo ""
+    echo -e "${MAGENTA}☸️  K8s集群管理:${NC}"
+    echo "  hook k8s      - K8s集群管理菜单"
+    echo "  hook k8s-deploy - 部署K8s集群"
+    echo "  hook k8s-status - 查看集群状态"
+    echo "  hook k8s-logs - 查看组件日志"
+    echo "  hook k8s-config - 生成配置文件"
     echo ""
     echo -e "${MAGENTA}📥 项目初始化:${NC}"
     echo "  hook init      - 从官方仓库初始化项目"
@@ -2736,6 +2754,1113 @@ show_import_history() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
+# =============================================================================
+# K8s 集群管理功能
+# =============================================================================
+
+# K8s 管理菜单
+show_k8s_menu() {
+    # 检查Dialog是否可用
+    if ! command -v dialog &> /dev/null; then
+        print_warning "Dialog不可用，使用命令行模式"
+        show_k8s_menu_cli
+        return
+    fi
+    
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_k8s_menu$$
+    
+    # 显示K8s管理菜单
+    dialog --title "☸️  K8s 集群管理" \
+           --backtitle "MineAdmin 管理工具" \
+           --menu "请选择要执行的K8s操作：" 0 0 0 \
+           1 "部署K8s集群" \
+           2 "查看集群状态" \
+           3 "查看组件日志" \
+           4 "生成配置文件" \
+           5 "添加工作节点" \
+           6 "删除工作节点" \
+           7 "升级集群版本" \
+           8 "备份集群配置" \
+           9 "恢复集群配置" \
+           10 "卸载K8s集群" \
+           0 "返回主菜单" 2> "$tempfile"
+    
+    # 读取选择结果
+    local choice=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    # 处理选择
+    case $choice in
+        1)
+            deploy_k8s_cluster
+            ;;
+        2)
+            show_k8s_status
+            ;;
+        3)
+            show_k8s_logs
+            ;;
+        4)
+            generate_k8s_config
+            ;;
+        5)
+            add_worker_node
+            ;;
+        6)
+            remove_worker_node
+            ;;
+        7)
+            upgrade_k8s_cluster
+            ;;
+        8)
+            backup_k8s_config
+            ;;
+        9)
+            restore_k8s_config
+            ;;
+        10)
+            uninstall_k8s_cluster
+            ;;
+        0)
+            print_info "返回主菜单"
+            ;;
+        *)
+            print_info "取消操作"
+            ;;
+    esac
+}
+
+# K8s 命令行菜单
+show_k8s_menu_cli() {
+    clear
+    print_title
+    echo ""
+    echo -e "${WHITE}☸️  K8s 集群管理菜单${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${MAGENTA}🚀 集群部署:${NC}"
+    echo "  1. 部署K8s集群"
+    echo "  2. 添加工作节点"
+    echo "  3. 删除工作节点"
+    echo ""
+    echo -e "${MAGENTA}📊 集群监控:${NC}"
+    echo "  4. 查看集群状态"
+    echo "  5. 查看组件日志"
+    echo "  6. 生成配置文件"
+    echo ""
+    echo -e "${MAGENTA}🔧 集群维护:${NC}"
+    echo "  7. 升级集群版本"
+    echo "  8. 备份集群配置"
+    echo "  9. 恢复集群配置"
+    echo "  10. 卸载K8s集群"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${CYAN}请选择操作 (1-10):${NC}"
+    read -r choice
+    
+    case $choice in
+        1)
+            deploy_k8s_cluster
+            ;;
+        2)
+            add_worker_node
+            ;;
+        3)
+            remove_worker_node
+            ;;
+        4)
+            show_k8s_status
+            ;;
+        5)
+            show_k8s_logs
+            ;;
+        6)
+            generate_k8s_config
+            ;;
+        7)
+            upgrade_k8s_cluster
+            ;;
+        8)
+            backup_k8s_config
+            ;;
+        9)
+            restore_k8s_config
+            ;;
+        10)
+            uninstall_k8s_cluster
+            ;;
+        *)
+            print_info "取消操作"
+            ;;
+    esac
+}
+
+# 检查K8s系统兼容性
+check_k8s_compatibility() {
+    echo -e "${BLUE}[1/7] 检测操作系统...${NC}"
+    
+    # 检测操作系统
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        echo -e "${WHITE}操作系统:${NC} $PRETTY_NAME"
+        echo -e "${WHITE}版本:${NC} $VERSION_ID"
+        
+        if [[ "$ID" == "ubuntu" ]]; then
+            if [[ "$VERSION_ID" == "24.04" ]] || [[ "$VERSION_ID" == "22.04" ]]; then
+                print_success "Ubuntu $VERSION_ID - 兼容K8s"
+            else
+                print_warning "Ubuntu $VERSION_ID - 可能兼容，建议使用24.04或22.04"
+            fi
+        else
+            print_warning "非Ubuntu系统，可能不兼容"
+        fi
+    else
+        print_warning "无法检测操作系统信息"
+    fi
+    
+    echo -e "${BLUE}[2/7] 检测系统架构...${NC}"
+    echo -e "${WHITE}架构:${NC} $ARCH"
+    
+    if [[ "$ARCH" == "x86_64" ]] || [[ "$ARCH" == "amd64" ]] || [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+        print_success "$ARCH 架构 - 兼容K8s"
+    else
+        print_error "未知架构 $ARCH - 不兼容K8s"
+        return 1
+    fi
+    
+    echo -e "${BLUE}[3/7] 检测内存...${NC}"
+    local mem_total=0
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        mem_total=$(sysctl -n hw.memsize | awk '{printf "%.0f", $1/1024/1024/1024}')
+    else
+        mem_total=$(free -m | awk 'NR==2{printf "%.0f", $2/1024}')
+    fi
+    echo -e "${WHITE}总内存:${NC} ${mem_total}GB"
+    
+    if [[ $mem_total -ge 4 ]]; then
+        print_success "内存充足 (≥4GB)"
+    elif [[ $mem_total -ge 2 ]]; then
+        print_warning "内存基本满足 (≥2GB)，建议4GB以上"
+    else
+        print_error "内存不足 (<2GB)，无法运行K8s"
+        return 1
+    fi
+    
+    echo -e "${BLUE}[4/7] 检测磁盘空间...${NC}"
+    local disk_free=0
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        disk_free=$(df -g / | awk 'NR==2{print $4}')
+    else
+        disk_free=$(df -BG / | awk 'NR==2{print $4}' | sed 's/G//')
+    fi
+    echo -e "${WHITE}可用空间:${NC} ${disk_free}GB"
+    
+    if [[ $disk_free -ge 20 ]]; then
+        print_success "磁盘空间充足 (≥20GB可用)"
+    elif [[ $disk_free -ge 10 ]]; then
+        print_warning "磁盘空间基本满足 (≥10GB可用)，建议20GB以上"
+    else
+        print_error "磁盘空间不足 (<10GB可用)，无法运行K8s"
+        return 1
+    fi
+    
+    echo -e "${BLUE}[5/7] 检测网络连接...${NC}"
+    if curl -s --connect-timeout 5 https://www.google.com &> /dev/null; then
+        print_success "外网连接正常"
+    else
+        print_warning "外网连接可能有问题"
+    fi
+    
+    if curl -s --connect-timeout 5 https://packages.cloud.google.com &> /dev/null; then
+        print_success "Google Cloud连接正常"
+    else
+        print_warning "Google Cloud连接可能有问题"
+    fi
+    
+    echo -e "${BLUE}[6/7] 检测必要工具...${NC}"
+    local tools=("curl" "wget" "grep" "sed" "awk" "systemctl")
+    local missing_tools=()
+    
+    for tool in "${tools[@]}"; do
+        if command -v "$tool" &> /dev/null; then
+            print_success "$tool - 已安装"
+        else
+            print_error "$tool - 未安装"
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    if [ ${#missing_tools[@]} -eq 0 ]; then
+        print_success "所有必要工具都已安装"
+    else
+        print_warning "缺少以下工具: ${missing_tools[*]}"
+        echo "请运行: sudo apt update && sudo apt install -y ${missing_tools[*]}"
+    fi
+    
+    echo -e "${BLUE}[7/7] 检测系统配置...${NC}"
+    
+    # 检查swap状态
+    if swapon --show | grep -q "/"; then
+        print_warning "检测到swap已启用，K8s建议禁用swap"
+        echo "建议运行: sudo swapoff -a && sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab"
+    else
+        print_success "swap已禁用"
+    fi
+    
+    # 检查防火墙状态
+    if command -v ufw &> /dev/null; then
+        if sudo ufw status | grep -q "Status: active"; then
+            print_warning "UFW防火墙已启用，可能需要配置K8s端口"
+        else
+            print_success "UFW防火墙未启用"
+        fi
+    fi
+    
+    # 检查SELinux状态（如果存在）
+    if command -v sestatus &> /dev/null; then
+        if sestatus | grep -q "SELinux status: enabled"; then
+            print_warning "SELinux已启用，可能需要配置"
+        else
+            print_success "SELinux未启用"
+        fi
+    fi
+    
+    # 检查cgroup版本
+    if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
+        print_success "cgroup v2已启用"
+    else
+        print_warning "cgroup v1检测到，建议升级到v2"
+    fi
+    
+    # 检查现有K8s安装
+    if command -v kubeadm &> /dev/null || command -v kubectl &> /dev/null || command -v kubelet &> /dev/null; then
+        print_warning "检测到现有K8s组件，安装过程中将自动清理"
+    fi
+    
+    if [[ -d /etc/kubernetes ]] || [[ -d /var/lib/kubelet ]]; then
+        print_warning "检测到现有K8s配置，安装过程中将自动清理"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}🎯 K8s兼容性检测结果:${NC}"
+    echo "✅ 系统兼容K8s部署"
+    echo "📋 建议配置: 4GB+ 内存, 20GB+ 磁盘空间"
+    echo "🌐 需要稳定的网络连接"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+# 部署K8s集群
+deploy_k8s_cluster() {
+    print_info "开始部署K8s集群..."
+    
+    # 检查是否为root用户
+    if [[ $EUID -eq 0 ]]; then
+        print_error "请不要使用root用户运行此脚本"
+        return 1
+    fi
+    
+    # 检查系统兼容性
+    echo -e "${BLUE}[1/8] 检查系统兼容性...${NC}"
+    if ! check_k8s_compatibility; then
+        print_error "系统不兼容K8s，部署终止"
+        return 1
+    fi
+    
+    # 选择部署模式
+    echo -e "${BLUE}[2/8] 选择部署模式...${NC}"
+    echo ""
+    echo -e "${WHITE}请选择部署模式:${NC}"
+    echo "1. 单机模式 - 主控和节点都在一台服务器"
+    echo "2. 集群模式 - 主控和节点分布在不同服务器"
+    echo ""
+    echo -e "${CYAN}请输入选择 (1-2):${NC}"
+    read -r deploy_mode
+    
+    case $deploy_mode in
+        1)
+            deploy_single_node_k8s
+            ;;
+        2)
+            deploy_multi_node_k8s
+            ;;
+        *)
+            print_info "取消部署"
+            return
+            ;;
+    esac
+}
+
+# 部署单节点K8s
+deploy_single_node_k8s() {
+    print_info "开始部署单节点K8s集群..."
+    
+    # 安装Docker和containerd
+    echo -e "${BLUE}[3/9] 安装Docker和containerd...${NC}"
+    install_docker_containerd
+    
+    # 安装K8s组件
+    echo -e "${BLUE}[4/9] 安装K8s组件...${NC}"
+    install_k8s_components
+    
+    # 初始化集群
+    echo -e "${BLUE}[5/9] 初始化K8s集群...${NC}"
+    init_k8s_cluster
+    
+    # 配置网络插件
+    echo -e "${BLUE}[6/9] 配置网络插件...${NC}"
+    install_network_plugin
+    
+    # 部署MineAdmin到K8s
+    echo -e "${BLUE}[7/9] 部署MineAdmin到K8s...${NC}"
+    deploy_mineadmin_to_k8s
+    
+    # 验证部署
+    echo -e "${BLUE}[8/9] 验证部署结果...${NC}"
+    verify_k8s_deployment
+    
+    # 显示访问信息
+    echo -e "${BLUE}[9/9] 显示访问信息...${NC}"
+    show_k8s_access_info
+    
+    print_success "单节点K8s集群部署完成！"
+    show_k8s_access_info
+}
+
+# 部署多节点K8s
+deploy_multi_node_k8s() {
+    print_info "开始部署多节点K8s集群..."
+    
+    # 选择角色
+    echo ""
+    echo -e "${WHITE}请选择当前服务器的角色:${NC}"
+    echo "1. 主控节点 (Master Node)"
+    echo "2. 工作节点 (Worker Node)"
+    echo ""
+    echo -e "${CYAN}请输入选择 (1-2):${NC}"
+    read -r node_role
+    
+    case $node_role in
+        1)
+            deploy_master_node
+            ;;
+        2)
+            deploy_worker_node
+            ;;
+        *)
+            print_info "取消部署"
+            return
+            ;;
+    esac
+}
+
+# 部署主控节点
+deploy_master_node() {
+    print_info "开始部署主控节点..."
+    
+    # 安装Docker和containerd
+    echo -e "${BLUE}[1/7] 安装Docker和containerd...${NC}"
+    install_docker_containerd
+    
+    # 安装K8s组件
+    echo -e "${BLUE}[2/7] 安装K8s组件...${NC}"
+    install_k8s_components
+    
+    # 初始化主控节点
+    echo -e "${BLUE}[3/7] 初始化主控节点...${NC}"
+    init_master_node
+    
+    # 配置网络插件
+    echo -e "${BLUE}[4/7] 配置网络插件...${NC}"
+    install_network_plugin
+    
+    # 部署MineAdmin到K8s
+    echo -e "${BLUE}[5/7] 部署MineAdmin到K8s...${NC}"
+    deploy_mineadmin_to_k8s
+    
+    # 生成节点加入信息
+    echo -e "${BLUE}[6/7] 生成节点加入信息...${NC}"
+    generate_join_info
+    
+    # 显示主控节点信息
+    echo -e "${BLUE}[7/7] 显示主控节点信息...${NC}"
+    show_master_node_info
+    
+    print_success "主控节点部署完成！"
+    show_master_node_info
+}
+
+# 部署工作节点
+deploy_worker_node() {
+    print_info "开始部署工作节点..."
+    
+    # 获取主控节点信息
+    echo -e "${BLUE}[1/6] 获取主控节点信息...${NC}"
+    get_master_node_info
+    
+    # 安装Docker和containerd
+    echo -e "${BLUE}[2/6] 安装Docker和containerd...${NC}"
+    install_docker_containerd
+    
+    # 安装K8s组件
+    echo -e "${BLUE}[3/6] 安装K8s组件...${NC}"
+    install_k8s_components
+    
+    # 加入集群
+    echo -e "${BLUE}[4/6] 加入K8s集群...${NC}"
+    join_cluster
+    
+    # 验证节点状态
+    echo -e "${BLUE}[5/6] 验证节点状态...${NC}"
+    verify_worker_node
+    
+    # 显示工作节点信息
+    echo -e "${BLUE}[6/6] 显示工作节点信息...${NC}"
+    show_worker_node_info
+    
+    print_success "工作节点部署完成！"
+    show_worker_node_info
+}
+
+# 安装Docker和containerd
+install_docker_containerd() {
+    print_info "安装Docker和containerd..."
+    
+    # 环境清理
+    print_info "清理旧的Docker和containerd配置..."
+    
+    # 停止现有服务
+    sudo systemctl stop docker 2>/dev/null || true
+    sudo systemctl stop containerd 2>/dev/null || true
+    
+    # 清理旧的Docker数据（可选，保留镜像）
+    # sudo rm -rf /var/lib/docker/ 2>/dev/null || true
+    
+    # 检查Docker是否已安装
+    if command -v docker &> /dev/null; then
+        print_success "Docker已安装"
+    else
+        print_info "安装Docker..."
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
+        sudo usermod -aG docker $USER
+        rm get-docker.sh
+        print_success "Docker安装完成"
+    fi
+    
+    # 检查containerd是否已安装
+    if command -v containerd &> /dev/null; then
+        print_success "containerd已安装"
+    else
+        print_info "安装containerd..."
+        sudo apt-get update
+        sudo apt-get install -y containerd
+        print_success "containerd安装完成"
+    fi
+    
+    # 配置containerd
+    print_info "配置containerd..."
+    sudo mkdir -p /etc/containerd
+    containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    sudo systemctl restart containerd
+    sudo systemctl enable containerd
+    print_success "containerd配置完成"
+}
+
+# 安装K8s组件
+install_k8s_components() {
+    print_info "安装K8s组件..."
+    
+    # 环境检查和清理
+    print_info "执行环境检查和清理..."
+    
+    # 1. 停止并清理现有的K8s服务
+    print_info "停止现有K8s服务..."
+    sudo systemctl stop kubelet 2>/dev/null || true
+    sudo systemctl stop containerd 2>/dev/null || true
+    
+    # 2. 重置kubeadm（如果存在）
+    if command -v kubeadm &> /dev/null; then
+        print_info "重置现有kubeadm配置..."
+        sudo kubeadm reset -f 2>/dev/null || true
+    fi
+    
+    # 3. 清理旧的K8s文件和配置
+    print_info "清理旧的K8s文件和配置..."
+    sudo rm -rf /etc/kubernetes/ 2>/dev/null || true
+    sudo rm -rf /var/lib/kubelet/ 2>/dev/null || true
+    sudo rm -rf /var/lib/etcd/ 2>/dev/null || true
+    sudo rm -rf $HOME/.kube/ 2>/dev/null || true
+    sudo rm -rf /etc/cni/ 2>/dev/null || true
+    sudo rm -rf /opt/cni/ 2>/dev/null || true
+    sudo rm -f /etc/apt/sources.list.d/kubernetes.list 2>/dev/null || true
+    sudo rm -f /etc/apt/keyrings/kubernetes-archive-keyring.gpg 2>/dev/null || true
+    sudo rm -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg 2>/dev/null || true
+    
+    # 4. 清理旧的systemd服务文件
+    print_info "清理旧的systemd服务文件..."
+    sudo rm -f /etc/systemd/system/kubelet.service 2>/dev/null || true
+    sudo rm -rf /etc/systemd/system/kubelet.service.d/ 2>/dev/null || true
+    
+    # 5. 禁用swap（K8s要求）
+    print_info "检查并禁用swap..."
+    if swapon --show | grep -q "/"; then
+        print_warning "检测到swap已启用，正在禁用..."
+        sudo swapoff -a
+        sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+        print_success "swap已禁用"
+    else
+        print_success "swap未启用"
+    fi
+    
+    # 6. 确保containerd配置正确
+    print_info "配置containerd..."
+    sudo mkdir -p /etc/containerd
+    containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    sudo systemctl restart containerd
+    sudo systemctl enable containerd
+    
+    # 7. 更新包列表
+    sudo apt-get update
+    
+    # 8. 安装必要的工具
+    sudo apt-get install -y apt-transport-https ca-certificates curl
+    
+    # 9. 检测架构
+    local arch=""
+    if [[ "$ARCH" == "x86_64" ]] || [[ "$ARCH" == "amd64" ]]; then
+        arch="amd64"
+    elif [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+        arch="arm64"
+    else
+        print_error "不支持的架构: $ARCH"
+        return 1
+    fi
+    
+    print_info "检测到架构: $arch"
+    
+    # 10. 下载K8s组件
+    print_info "下载K8s组件..."
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$arch/kubeadm"
+    sudo install -o root -g root -m 0755 kubeadm /usr/local/bin/kubeadm
+    
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$arch/kubelet"
+    sudo install -o root -g root -m 0755 kubelet /usr/local/bin/kubelet
+    
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$arch/kubectl"
+    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    
+    # 清理下载文件
+    rm -f kubeadm kubelet kubectl
+    
+    # 11. 创建kubelet服务文件
+    print_info "创建kubelet服务文件..."
+    sudo tee /etc/systemd/system/kubelet.service << EOF
+[Unit]
+Description=kubelet: The Kubernetes Node Agent
+Documentation=https://kubernetes.io/docs/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/kubelet
+Restart=always
+StartLimitInterval=0
+RestartSec=10
+Environment="KUBELET_EXTRA_ARGS=--container-runtime-endpoint=unix:///var/run/containerd/containerd.sock"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # 12. 创建kubelet服务配置目录
+    sudo mkdir -p /etc/systemd/system/kubelet.service.d
+    sudo tee /etc/systemd/system/kubelet.service.d/10-kubeadm.conf << EOF
+# Note: This dropin only works with kubeadm and kubelet v1.11+
+[Service]
+Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+Environment="KUBELET_SYSTEM_PODS_ARGS=--pod-manifest-path=/etc/kubernetes/manifests --allow-privileged=true"
+Environment="KUBELET_NETWORK_ARGS=--network-plugin=cni --cni-conf-dir=/etc/cni/net.d --cni-bin-dir=/opt/cni/bin"
+Environment="KUBELET_DNS_ARGS=--cluster-dns=10.96.0.10 --cluster-domain=cluster.local"
+Environment="KUBELET_AUTHZ_ARGS=--authorization-mode=Webhook --client-ca-file=/etc/kubernetes/pki/ca.crt"
+Environment="KUBELET_CADVISOR_ARGS=--cadvisor-port=0"
+Environment="KUBELET_CGROUP_ARGS=--cgroup-driver=systemd"
+Environment="KUBELET_CERTIFICATE_ARGS=--rotate-certificates=true --cert-dir=/var/lib/kubelet/pki"
+Environment="KUBELET_EXTRA_ARGS=--container-runtime-endpoint=unix:///var/run/containerd/containerd.sock --container-runtime=remote"
+ExecStart=
+ExecStart=/usr/local/bin/kubelet \$KUBELET_KUBECONFIG_ARGS \$KUBELET_CONFIG_ARGS \$KUBELET_KUBEADM_ARGS \$KUBELET_EXTRA_ARGS
+EOF
+    
+    # 13. 重新加载systemd配置
+    sudo systemctl daemon-reload
+    
+    # 14. 启用kubelet服务
+    sudo systemctl enable kubelet
+    
+    print_success "K8s组件安装完成"
+}
+
+# 初始化K8s集群
+init_k8s_cluster() {
+    print_info "初始化K8s集群..."
+    
+    # 获取本机IP
+    local node_ip=$(hostname -I | awk '{print $1}')
+    
+    # 初始化集群（添加必要的参数）
+    print_info "使用IP: $node_ip 初始化集群..."
+    sudo kubeadm init \
+        --pod-network-cidr=10.244.0.0/16 \
+        --apiserver-advertise-address=$node_ip \
+        --cri-socket=unix:///var/run/containerd/containerd.sock \
+        --upload-certs \
+        --control-plane-endpoint=$node_ip
+    
+    # 配置kubectl
+    mkdir -p $HOME/.kube
+    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    sudo chown $(id -u):$(id -g) $HOME/.kube/config
+    
+    print_success "K8s集群初始化完成"
+}
+
+# 初始化主控节点
+init_master_node() {
+    print_info "初始化主控节点..."
+    
+    # 获取本机IP
+    local node_ip=$(hostname -I | awk '{print $1}')
+    
+    # 初始化主控节点（添加必要的参数）
+    print_info "使用IP: $node_ip 初始化主控节点..."
+    sudo kubeadm init \
+        --pod-network-cidr=10.244.0.0/16 \
+        --apiserver-advertise-address=$node_ip \
+        --control-plane-endpoint=$node_ip \
+        --cri-socket=unix:///var/run/containerd/containerd.sock \
+        --upload-certs
+    
+    # 配置kubectl
+    mkdir -p $HOME/.kube
+    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    sudo chown $(id -u):$(id -g) $HOME/.kube/config
+    
+    print_success "主控节点初始化完成"
+}
+
+# 安装网络插件
+install_network_plugin() {
+    print_info "安装网络插件 (Calico)..."
+    
+    # 安装Calico
+    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/tigera-operator.yaml
+    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/custom-resources.yaml
+    
+    # 等待网络插件就绪
+    print_info "等待网络插件就绪..."
+    kubectl wait --for=condition=ready pod -l name=calico-node -n kube-system --timeout=300s
+    
+    print_success "网络插件安装完成"
+}
+
+# 部署MineAdmin到K8s
+deploy_mineadmin_to_k8s() {
+    print_info "部署MineAdmin到K8s..."
+    
+    # 创建命名空间
+    kubectl create namespace mineadmin
+    
+    # 创建配置文件
+    local k8s_dir="$PROJECT_ROOT/docker/k8s"
+    mkdir -p "$k8s_dir"
+    
+    # 生成MineAdmin部署配置
+    cat > "$k8s_dir/mineadmin-deployment.yaml" << EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mineadmin-server
+  namespace: mineadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mineadmin-server
+  template:
+    metadata:
+      labels:
+        app: mineadmin-server
+    spec:
+      containers:
+      - name: mineadmin-server
+        image: mineadmin/server-app:latest
+        ports:
+        - containerPort: 9501
+        env:
+        - name: APP_ENV
+          value: "production"
+        - name: DB_HOST
+          value: "mysql-service"
+        - name: REDIS_HOST
+          value: "redis-service"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mineadmin-server-service
+  namespace: mineadmin
+spec:
+  selector:
+    app: mineadmin-server
+  ports:
+  - port: 80
+    targetPort: 9501
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mineadmin-ingress
+  namespace: mineadmin
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: mineadmin.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mineadmin-server-service
+            port:
+              number: 80
+EOF
+    
+    # 应用配置
+    kubectl apply -f "$k8s_dir/mineadmin-deployment.yaml"
+    
+    print_success "MineAdmin部署到K8s完成"
+}
+
+# 验证K8s部署
+verify_k8s_deployment() {
+    print_info "验证K8s部署..."
+    
+    # 检查节点状态
+    echo -e "${WHITE}节点状态:${NC}"
+    kubectl get nodes
+    
+    # 检查Pod状态
+    echo -e "${WHITE}Pod状态:${NC}"
+    kubectl get pods --all-namespaces
+    
+    # 检查服务状态
+    echo -e "${WHITE}服务状态:${NC}"
+    kubectl get services --all-namespaces
+    
+    print_success "K8s部署验证完成"
+}
+
+# 显示K8s访问信息
+show_k8s_access_info() {
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}🎯 K8s集群访问信息:${NC}"
+    echo "集群状态: kubectl get nodes"
+    echo "Pod状态: kubectl get pods --all-namespaces"
+    echo "服务状态: kubectl get services --all-namespaces"
+    echo "MineAdmin访问: kubectl port-forward -n mineadmin svc/mineadmin-server-service 8080:80"
+    echo "然后访问: http://localhost:8080"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+# 生成节点加入信息
+generate_join_info() {
+    print_info "生成节点加入信息..."
+    
+    # 生成加入命令
+    local join_command=$(kubeadm token create --print-join-command)
+    
+    # 保存到文件
+    local join_file="$PROJECT_ROOT/docker/k8s/join-command.txt"
+    echo "$join_command" > "$join_file"
+    
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}🎯 工作节点加入命令:${NC}"
+    echo "$join_command"
+    echo ""
+    echo -e "${WHITE}📁 命令已保存到:${NC} $join_file"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+# 显示主控节点信息
+show_master_node_info() {
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}🎯 主控节点信息:${NC}"
+    echo "节点IP: $(hostname -I | awk '{print $1}')"
+    echo "集群状态: kubectl get nodes"
+    echo "加入命令已保存到: $PROJECT_ROOT/docker/k8s/join-command.txt"
+    echo ""
+    echo -e "${YELLOW}下一步:${NC}"
+    echo "1. 在其他服务器上运行工作节点部署"
+    echo "2. 使用生成的加入命令将工作节点加入集群"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+# 获取主控节点信息
+get_master_node_info() {
+    echo -e "${WHITE}请输入主控节点信息:${NC}"
+    echo ""
+    echo -e "${CYAN}主控节点IP地址:${NC}"
+    read -r master_ip
+    
+    echo -e "${CYAN}加入命令 (从主控节点获取):${NC}"
+    read -r join_command
+    
+    # 保存到临时文件
+    local temp_file="$PROJECT_ROOT/docker/k8s/temp-join-command.txt"
+    echo "$join_command" > "$temp_file"
+    
+    print_success "主控节点信息已保存"
+}
+
+# 加入集群
+join_cluster() {
+    print_info "加入K8s集群..."
+    
+    local temp_file="$PROJECT_ROOT/docker/k8s/temp-join-command.txt"
+    if [ -f "$temp_file" ]; then
+        local join_command=$(cat "$temp_file")
+        sudo $join_command
+        rm -f "$temp_file"
+        print_success "已加入K8s集群"
+    else
+        print_error "未找到加入命令"
+        return 1
+    fi
+}
+
+# 验证工作节点
+verify_worker_node() {
+    print_info "验证工作节点状态..."
+    
+    # 等待节点就绪
+    sleep 10
+    
+    # 检查节点状态
+    echo -e "${WHITE}节点状态:${NC}"
+    kubectl get nodes
+    
+    print_success "工作节点验证完成"
+}
+
+# 显示工作节点信息
+show_worker_node_info() {
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}🎯 工作节点信息:${NC}"
+    echo "节点IP: $(hostname -I | awk '{print $1}')"
+    echo "节点状态: kubectl get nodes"
+    echo ""
+    echo -e "${YELLOW}注意:${NC}"
+    echo "工作节点已成功加入集群"
+    echo "在主控节点上运行 'kubectl get nodes' 查看所有节点"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+# 查看K8s集群状态
+show_k8s_status() {
+    print_info "查看K8s集群状态..."
+    
+    if ! command -v kubectl &> /dev/null; then
+        print_error "kubectl未安装，请先部署K8s集群"
+        return 1
+    fi
+    
+    echo -e "${WHITE}节点状态:${NC}"
+    kubectl get nodes
+    
+    echo ""
+    echo -e "${WHITE}Pod状态:${NC}"
+    kubectl get pods --all-namespaces
+    
+    echo ""
+    echo -e "${WHITE}服务状态:${NC}"
+    kubectl get services --all-namespaces
+    
+    echo ""
+    echo -e "${WHITE}命名空间:${NC}"
+    kubectl get namespaces
+}
+
+# 查看K8s组件日志
+show_k8s_logs() {
+    print_info "查看K8s组件日志..."
+    
+    if ! command -v kubectl &> /dev/null; then
+        print_error "kubectl未安装，请先部署K8s集群"
+        return 1
+    fi
+    
+    echo -e "${WHITE}请选择要查看的组件:${NC}"
+    echo "1. kube-apiserver"
+    echo "2. kube-controller-manager"
+    echo "3. kube-scheduler"
+    echo "4. kubelet"
+    echo "5. kube-proxy"
+    echo "6. calico-node"
+    echo "7. mineadmin-server"
+    echo ""
+    echo -e "${CYAN}请输入选择 (1-7):${NC}"
+    read -r component_choice
+    
+    case $component_choice in
+        1)
+            kubectl logs -n kube-system kube-apiserver-$(hostname)
+            ;;
+        2)
+            kubectl logs -n kube-system kube-controller-manager-$(hostname)
+            ;;
+        3)
+            kubectl logs -n kube-system kube-scheduler-$(hostname)
+            ;;
+        4)
+            sudo journalctl -u kubelet -f
+            ;;
+        5)
+            kubectl logs -n kube-system kube-proxy-$(hostname)
+            ;;
+        6)
+            kubectl logs -n kube-system -l k8s-app=calico-node
+            ;;
+        7)
+            kubectl logs -n mineadmin -l app=mineadmin-server
+            ;;
+        *)
+            print_info "取消查看日志"
+            ;;
+    esac
+}
+
+# 生成K8s配置文件
+generate_k8s_config() {
+    print_info "生成K8s配置文件..."
+    
+    local k8s_dir="$PROJECT_ROOT/docker/k8s"
+    mkdir -p "$k8s_dir"
+    
+    # 生成基础配置文件
+    cat > "$k8s_dir/kubeadm-config.yaml" << EOF
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: v1.28.0
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+apiServer:
+  extraArgs:
+    advertise-address: $(hostname -I | awk '{print $1}')
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+nodeRegistration:
+  criSocket: "unix:///var/run/containerd/containerd.sock"
+EOF
+    
+    print_success "K8s配置文件已生成: $k8s_dir/kubeadm-config.yaml"
+}
+
+# 添加工作节点
+add_worker_node() {
+    print_info "添加工作节点功能待实现"
+    echo "此功能将在后续版本中实现"
+}
+
+# 删除工作节点
+remove_worker_node() {
+    print_info "删除工作节点功能待实现"
+    echo "此功能将在后续版本中实现"
+}
+
+# 升级K8s集群
+upgrade_k8s_cluster() {
+    print_info "升级K8s集群功能待实现"
+    echo "此功能将在后续版本中实现"
+}
+
+# 备份K8s配置
+backup_k8s_config() {
+    print_info "备份K8s配置..."
+    
+    local backup_dir="$PROJECT_ROOT/docker/k8s/backup/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    
+    # 备份kubeconfig
+    if [ -f "$HOME/.kube/config" ]; then
+        cp "$HOME/.kube/config" "$backup_dir/"
+    fi
+    
+    # 备份集群配置
+    if command -v kubectl &> /dev/null; then
+        kubectl get all --all-namespaces -o yaml > "$backup_dir/cluster-backup.yaml"
+    fi
+    
+    print_success "K8s配置已备份到: $backup_dir"
+}
+
+# 恢复K8s配置
+restore_k8s_config() {
+    print_info "恢复K8s配置功能待实现"
+    echo "此功能将在后续版本中实现"
+}
+
+# 卸载K8s集群
+uninstall_k8s_cluster() {
+    print_info "卸载K8s集群..."
+    
+    echo -e "${RED}警告: 此操作将完全删除K8s集群及其所有数据！${NC}"
+    read -p "确认要卸载K8s集群吗？(输入 'yes' 确认): " confirm
+    
+    if [[ "$confirm" == "yes" ]]; then
+        # 重置kubeadm
+        sudo kubeadm reset -f
+        
+        # 删除kubeconfig
+        rm -rf $HOME/.kube
+        
+        # 卸载K8s组件
+        sudo apt-get purge -y kubeadm kubectl kubelet kubernetes-cni kube*
+        sudo apt-get autoremove -y
+        
+        # 删除K8s相关文件
+        sudo rm -rf /etc/kubernetes/
+        sudo rm -rf ~/.kube/
+        sudo rm -rf /var/lib/kubelet/
+        sudo rm -rf /var/lib/etcd/
+        
+        print_success "K8s集群已完全卸载"
+    else
+        print_info "卸载已取消"
+    fi
+}
+
 # 容器导入功能
 import_containers() {
     print_info "容器导入功能"
@@ -3260,6 +4385,13 @@ show_help() {
     echo "- 查看导出镜像: hook list-images"
     echo "- 清理导出镜像: hook clean-images"
     echo ""
+    echo -e "${BLUE}☸️  K8s集群管理:${NC}"
+    echo "- K8s集群管理菜单: hook k8s"
+    echo "- 部署K8s集群: hook k8s-deploy"
+    echo "- 查看集群状态: hook k8s-status"
+    echo "- 查看组件日志: hook k8s-logs"
+    echo "- 生成配置文件: hook k8s-config"
+    echo ""
     echo -e "${BLUE}📥 项目初始化:${NC}"
     echo "- 从官方仓库初始化项目: hook init"
     echo ""
@@ -3275,13 +4407,15 @@ show_help() {
     echo -e "${BLUE}📋 系统要求:${NC}"
     echo "- Ubuntu 24.04 LTS (推荐)"
     echo "- x86_64 或 ARM64 架构"
-    echo "- 至少2GB内存"
-    echo "- 至少10GB可用磁盘空间"
+    echo "- 至少2GB内存 (K8s建议4GB+)"
+    echo "- 至少10GB可用磁盘空间 (K8s建议20GB+)"
     echo "- Docker 24.x+"
     echo "- Docker Compose 2.x+"
     echo "- Dialog (可选，用于图形化界面)"
     echo "- Node.js 22.x (前端构建)"
     echo "- pnpm 10.x (前端构建)"
+    echo "- Kubernetes 1.28+ (K8s部署)"
+    echo "- containerd (K8s容器运行时)"
     echo ""
     echo -e "${BLUE}🌐 访问地址:${NC}"
     echo "- 后端API: http://服务器IP:9501"
@@ -3374,6 +4508,21 @@ handle_hook_command() {
             ;;
         clean-images)
             clean_exported_images
+            ;;
+        k8s)
+            show_k8s_menu
+            ;;
+        k8s-deploy)
+            deploy_k8s_cluster
+            ;;
+        k8s-status)
+            show_k8s_status
+            ;;
+        k8s-logs)
+            show_k8s_logs
+            ;;
+        k8s-config)
+            generate_k8s_config
             ;;
         clean)
             clean_docker_cache

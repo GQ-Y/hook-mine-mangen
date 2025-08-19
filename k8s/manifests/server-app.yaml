@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mineadmin-server
+  namespace: mineadmin
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mineadmin-server
+  template:
+    metadata:
+      labels:
+        app: mineadmin-server
+    spec:
+      containers:
+      - name: mineadmin-server
+        image: mineadmin/server-app:latest
+        ports:
+        - containerPort: 9501
+          name: http
+        - containerPort: 9502
+          name: websocket
+        - containerPort: 9509
+          name: grpc
+        env:
+        - name: APP_NAME
+          value: "MineAdmin"
+        - name: APP_ENV
+          value: "production"
+        - name: APP_DEBUG
+          value: "false"
+        - name: DB_DRIVER
+          value: "mysql"
+        - name: DB_HOST
+          value: "mysql-service"
+        - name: DB_PORT
+          value: "3306"
+        - name: DB_DATABASE
+          value: "mineadmin"
+        - name: DB_USERNAME
+          value: "mineadmin"
+        - name: DB_PASSWORD
+          value: "mineadmin123"
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_AUTH
+          value: "root123"
+        - name: REDIS_DB
+          value: "3"
+        - name: JWT_SECRET
+          value: "azOVxsOWt3r0ozZNz8Ss429ht0T8z6OpeIJAIwNp6X0xqrbEY2epfIWyxtC1qSNM8eD6/LQ/SahcQi2ByXa/2A=="
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9501
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9501
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mineadmin-server-service
+  namespace: mineadmin
+spec:
+  selector:
+    app: mineadmin-server
+  ports:
+  - name: http
+    port: 80
+    targetPort: 9501
+  - name: websocket
+    port: 9502
+    targetPort: 9502
+  - name: grpc
+    port: 9509
+    targetPort: 9509
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mineadmin-ingress
+  namespace: mineadmin
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: mineadmin.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mineadmin-server-service
+            port:
+              number: 80
