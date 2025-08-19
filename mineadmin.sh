@@ -498,14 +498,14 @@ install_mineadmin() {
     
     # 启动服务
     print_info "正在启动服务..."
-    docker-compose -f docker/docker-compose.yml up -d
+    docker-compose -f docker/docker-compose.yml --env-file server-app/.env up -d
     
     # 等待服务启动
     print_info "等待服务启动..."
     sleep 30
     
     # 检查服务状态
-    if docker-compose -f docker/docker-compose.yml ps | grep -q "Up"; then
+    if docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps | grep -q "Up"; then
         print_success "MineAdmin安装完成！"
         echo ""
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -529,7 +529,7 @@ install_mineadmin() {
         ask_install_plugins
     else
         print_error "服务启动失败，请检查日志"
-        docker-compose -f docker/docker-compose.yml logs
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env logs
     fi
 }
 
@@ -554,8 +554,8 @@ select_web_mode() {
         
         case $choice in
             1)
-                print_info "切换到生产模式..."
-                docker-compose -f docker/docker-compose.yml up -d web-prod
+                        print_info "切换到生产模式..."
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env up -d web-prod
                 print_success "已切换到生产模式，访问地址: http://$(hostname -I | awk '{print $1}'):80"
                 ;;
         esac
@@ -569,7 +569,7 @@ start_services() {
     print_info "正在启动所有服务..."
     cd "$PROJECT_ROOT"
     # 启动所有服务
-    docker-compose -f docker/docker-compose.yml up -d
+    docker-compose -f docker/docker-compose.yml --env-file server-app/.env up -d
     print_success "所有服务已启动"
 }
 
@@ -625,20 +625,20 @@ selective_start_services() {
         
         if [ -n "$base_services" ]; then
             print_info "启动基础服务: $base_services"
-            docker-compose -f docker/docker-compose.yml up -d $base_services
+            docker-compose -f docker/docker-compose.yml --env-file server-app/.env up -d $base_services
         fi
     fi
     
     # 启动后端服务（需要MySQL和Redis）
     if [ "$need_backend" = true ]; then
         print_info "启动后端服务..."
-        docker-compose -f docker/docker-compose.yml up -d server-app
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env up -d server-app
     fi
     
     # 启动前端生产服务
     if [ "$need_production" = true ]; then
         print_info "启动前端生产服务..."
-        docker-compose -f docker/docker-compose.yml up -d web-prod
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env up -d web-prod
     fi
     
     print_success "选中的服务已启动"
@@ -669,7 +669,7 @@ stop_services() {
     print_info "正在停止所有服务..."
     cd "$PROJECT_ROOT"
     # 停止所有服务
-    docker-compose -f docker/docker-compose.yml down
+    docker-compose -f docker/docker-compose.yml --env-file server-app/.env down
     print_success "所有服务已停止"
 }
 
@@ -678,7 +678,7 @@ restart_services() {
     print_info "正在重启所有服务..."
     cd "$PROJECT_ROOT"
     # 重启当前运行的服务（不包括生产模式）
-    docker-compose -f docker/docker-compose.yml restart
+    docker-compose -f docker/docker-compose.yml --env-file server-app/.env restart
     print_success "所有服务已重启"
 }
 
@@ -687,7 +687,7 @@ show_service_status() {
     print_info "服务状态:"
     cd "$PROJECT_ROOT"
     # 显示所有服务状态
-    docker-compose -f docker/docker-compose.yml ps
+    docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps
     echo ""
     print_info "系统资源使用情况:"
     docker stats --no-stream
@@ -723,7 +723,7 @@ show_container_logs() {
         cd "$PROJECT_ROOT"
         dialog --title "容器日志 - $container_name" \
                --backtitle "MineAdmin 管理工具" \
-               --textbox <(docker-compose -f docker/docker-compose.yml logs "$service_name") 20 80
+               --textbox <(docker-compose -f docker/docker-compose.yml --env-file server-app/.env logs "$service_name") 20 80
     fi
 }
 
@@ -816,10 +816,10 @@ generate_config_quick() {
     local db_port="3306"
     local db_database="mineadmin"
     local db_username="root"
-    local db_password="123456"
+    local db_password="root123"
     local redis_host="redis"
     local redis_port="6379"
-    local redis_password="123456"
+    local redis_password="root123"
     local redis_db="3"
     
     # 生成配置文件
@@ -889,6 +889,15 @@ APP_URL = $app_url
 JWT_SECRET=$jwt_secret
 
 MINE_ACCESS_TOKEN=$mine_access_token
+
+# Docker Compose 环境变量
+MYSQL_ROOT_PASSWORD=root123
+REDIS_PASSWORD=$redis_password
+TZ=Asia/Shanghai
+SERVER_PORT=9501
+SERVER_HTTP_PORT=9502
+SERVER_GRPC_PORT=9509
+WEB_PORT=80
 EOF
 }
 
@@ -912,10 +921,10 @@ generate_config_interactive() {
     local default_db_port="3306"
     local default_db_database="mineadmin"
     local default_db_username="root"
-    local default_db_password="123456"
+    local default_db_password="root123"
     local default_redis_host="redis"
     local default_redis_port="6379"
-    local default_redis_password="123456"
+    local default_redis_password="root123"
     local default_redis_db="3"
     local default_mine_access_token=""
     
@@ -976,7 +985,7 @@ generate_config_interactive() {
     db_username="${db_username:-$default_db_username}"
     
     # 数据库密码
-    echo -e "${CYAN}数据库密码${NC} [默认: 123456]:"
+    echo -e "${CYAN}数据库密码${NC} [默认: root123]:"
     read -s db_password
     echo ""
     db_password="${db_password:-$default_db_password}"
@@ -996,7 +1005,7 @@ generate_config_interactive() {
     redis_port="${redis_port:-$default_redis_port}"
     
     # Redis密码
-    echo -e "${CYAN}Redis密码${NC} [默认: 123456]:"
+    echo -e "${CYAN}Redis密码${NC} [默认: root123]:"
     read -s redis_password
     echo ""
     redis_password="${redis_password:-$default_redis_password}"
@@ -1220,7 +1229,7 @@ show_installed_plugins() {
     cd "$PROJECT_ROOT"
     
     # 检查容器是否运行
-    if ! docker-compose -f docker/docker-compose.yml ps | grep -q "server-app.*Up"; then
+    if ! docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps | grep -q "server-app.*Up"; then
         print_error "后端服务未运行，无法查看插件"
         return 1
     fi
@@ -1228,11 +1237,11 @@ show_installed_plugins() {
     print_info "正在获取已安装插件列表..."
     
     # 执行命令获取已安装插件
-    docker-compose -f docker/docker-compose.yml exec -T server-app swoole-cli bin/hyperf.php mine-extension:list 2>/dev/null || {
+    docker-compose -f docker/docker-compose.yml --env-file server-app/.env exec -T server-app swoole-cli bin/hyperf.php mine-extension:list 2>/dev/null || {
         print_warning "无法获取插件列表，可能没有安装插件或命令不存在"
         echo ""
         echo -e "${WHITE}手动查看插件目录:${NC}"
-        docker-compose -f docker/docker-compose.yml exec -T server-app ls -la /app/plugin/ 2>/dev/null || echo "插件目录不存在"
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env exec -T server-app ls -la /app/plugin/ 2>/dev/null || echo "插件目录不存在"
     }
 }
 
@@ -1341,8 +1350,8 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=$PROJECT_ROOT
-ExecStart=/usr/local/bin/docker-compose -f docker/docker-compose.yml up -d
-ExecStop=/usr/local/bin/docker-compose -f docker/docker-compose.yml down
+    ExecStart=/usr/local/bin/docker-compose -f docker/docker-compose.yml --env-file server-app/.env up -d
+    ExecStop=/usr/local/bin/docker-compose -f docker/docker-compose.yml --env-file server-app/.env down
 TimeoutStartSec=0
 
 [Install]
@@ -1490,7 +1499,7 @@ uninstall_mineadmin() {
         
         # 停止并删除容器
         cd "$PROJECT_ROOT"
-        docker-compose -f docker/docker-compose.yml --profile production down -v
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env --profile production down -v
         
         # 删除镜像
         docker rmi mineadmin/server-app:latest mineadmin/web-prod:latest 2>/dev/null || true
@@ -1769,9 +1778,9 @@ ask_install_plugins() {
         if [ $? -eq 0 ]; then
             print_info "正在安装插件: $plugin_name"
             
-            # 进入容器执行插件安装命令
-            cd "$PROJECT_ROOT"
-            docker-compose -f docker/docker-compose.yml exec -T server-app swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php mine-extension:install "$plugin_name" -y
+                    # 进入容器执行插件安装命令
+        cd "$PROJECT_ROOT"
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env exec -T server-app swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php mine-extension:install "$plugin_name" -y
             
             if [ $? -eq 0 ]; then
                 print_success "插件安装成功: $plugin_name"
@@ -1813,7 +1822,7 @@ export_containers() {
             compose_images+=("$line")
             print_info "找到镜像: $line"
         fi
-    done < <(docker-compose -f docker/docker-compose.yml config --images 2>/dev/null)
+    done < <(docker-compose -f docker/docker-compose.yml --env-file server-app/.env config --images 2>/dev/null)
     
     print_info "找到 ${#compose_images[@]} 个compose镜像"
     

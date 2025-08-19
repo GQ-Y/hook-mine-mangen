@@ -7,16 +7,18 @@ services:
     image: mysql:8.0
     container_name: mineadmin-mysql
     restart: unless-stopped
+    env_file:
+      - ../server-app/.env
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
-      MYSQL_DATABASE: mineadmin
-      MYSQL_USER: mineadmin
-      MYSQL_PASSWORD: ${DB_PASSWORD:-mineadmin123}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
       MYSQL_CHARACTER_SET_SERVER: utf8mb4
       MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
-      TZ: Asia/Shanghai
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "3306:3306"
+      - "${DB_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./k8s/mysql-init-script:/docker-entrypoint-initdb.d
@@ -34,13 +36,15 @@ services:
     image: redis:7-alpine
     container_name: mineadmin-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    env_file:
+      - ../server-app/.env
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -55,12 +59,14 @@ services:
     container_name: mineadmin-server
     restart: unless-stopped
     user: root
+    env_file:
+      - ../server-app/.env
     environment:
-      - TZ=Asia/Shanghai
+      - TZ=${TZ:-Asia/Shanghai}
     ports:
-      - "9501:9501"
-      - "9502:9502"
-      - "9509:9509"
+      - "${SERVER_PORT:-9501}:9501"
+      - "${SERVER_HTTP_PORT:-9502}:9502"
+      - "${SERVER_GRPC_PORT:-9509}:9509"
     volumes:
       - server_storage:/storage
       - server_runtime:/runtime
@@ -87,10 +93,12 @@ services:
     image: nginx:alpine
     container_name: mineadmin-web-prod
     restart: unless-stopped
+    env_file:
+      - ../server-app/.env
     environment:
-      - TZ=Asia/Shanghai
+      - TZ=${TZ:-Asia/Shanghai}
     ports:
-      - "80:80"
+      - "${WEB_PORT:-80}:80"
     volumes:
       # 生产模式：只映射构建后的dist目录和nginx配置
       - ../web/dist:/usr/share/nginx/html
