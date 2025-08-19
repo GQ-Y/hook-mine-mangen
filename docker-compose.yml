@@ -12,8 +12,6 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_DATABASE}
-      MYSQL_USER: ${DB_USERNAME}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
       MYSQL_CHARACTER_SET_SERVER: utf8mb4
       MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
       TZ: ${TZ:-Asia/Shanghai}
@@ -74,13 +72,21 @@ services:
       - server_temp:/tmp
       # 映射宿主机的 .env 文件到容器
       - ../server-app/.env:/app/.env
+      # 映射应用代码目录（以宿主机为主）
+      - ../server-app/app:/app/app
+      - ../server-app/config:/app/config
+      - ../server-app/plugin:/app/plugin
+      - ../server-app/tests:/app/tests
+      - ../server-app/public:/app/public
+      - ../server-app/storage:/app/storage
+      - ../server-app/runtime:/app/runtime
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9501/health"]
+      test: ["CMD", "pgrep", "-f", "MineAdmin.Master"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -105,7 +111,7 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
       - web_logs:/var/log/nginx
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -488,7 +488,7 @@ install_mineadmin() {
         print_warning "未知架构，使用默认架构: $build_arch"
     fi
     
-    print_info "检测到架构: $ARCH，使用构建平台: $build_arch"
+    print_info "检测到架构: $(uname -m)，使用构建平台: $build_arch"
     
     # 构建后端镜像
     docker build --platform $build_arch -f docker/Dockerfile.server-app -t mineadmin/server-app:latest .

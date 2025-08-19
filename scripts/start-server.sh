@@ -30,29 +30,34 @@ echo "✅ 找到 .env 文件"
 
 # 读取 .env 文件并设置环境变量
 echo "🔧 加载环境配置..."
-while IFS='=' read -r key value; do
+while IFS='=' read -r line; do
     # 跳过注释和空行
-    if [[ $key =~ ^[[:space:]]*# ]] || [[ -z $key ]]; then
+    if [[ $line =~ ^[[:space:]]*# ]] || [[ -z $line ]]; then
         continue
     fi
     
     # 移除前后空格
-    key=$(echo $key | xargs)
-    value=$(echo $value | xargs)
+    line=$(echo "$line" | xargs)
     
-    # 设置环境变量
-    export "$key=$value"
+    # 提取键和值（处理等号前后可能有空格的情况）
+    if [[ $line =~ ^([^=]+)=(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        
+        # 移除键和值的前后空格
+        key=$(echo "$key" | xargs)
+        value=$(echo "$value" | xargs)
+        
+        # 设置环境变量
+        export "$key=$value"
+        echo "   设置环境变量: $key"
+    fi
 done < /app/.env
 
-# 覆盖数据库和 Redis 配置以适配 Docker 网络
-echo "🔧 更新网络配置以适配 Docker 环境..."
-export DB_HOST="mysql"
-export REDIS_HOST="redis"
-export DB_PASSWORD="${DB_PASSWORD:-mineadmin123}"
-export REDIS_AUTH="${REDIS_PASSWORD:-redis123}"
+# 检查并显示当前配置
+echo "📋 当前环境配置:"
 
 echo "✅ 环境配置已加载"
-echo "📋 当前环境配置:"
 echo "   APP_ENV: ${APP_ENV}"
 echo "   APP_DEBUG: ${APP_DEBUG}"
 echo "   DB_HOST: ${DB_HOST}"
@@ -79,7 +84,7 @@ echo "✅ Redis服务已就绪"
 # 检查数据库连接
 echo "🔍 检查数据库连接..."
 # 使用简单的数据库连接测试
-swoole-cli bin/hyperf.php db:seed --class=menu_seeder_20240926 || {
+swoole-cli bin/hyperf.php db:seed || {
     echo "⚠️  数据库连接测试失败，但继续启动服务"
 }
 echo "✅ 数据库连接检查完成"
@@ -90,15 +95,6 @@ swoole-cli bin/hyperf.php migrate --force || {
     echo "⚠️  数据库迁移失败，但继续启动服务"
 }
 
-# 清理缓存
-echo "🧹 清理应用缓存..."
-swoole-cli bin/hyperf.php cache:clear || true
-
-# 生成应用密钥（如果不存在）
-if [ ! -f .env ] || ! grep -q "APP_KEY=" .env; then
-    echo "🔑 生成应用密钥..."
-    swoole-cli bin/hyperf.php key:generate || true
-fi
 
 # 启动服务
 echo "🚀 启动 MineAdmin 服务..."
