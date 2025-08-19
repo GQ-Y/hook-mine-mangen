@@ -337,7 +337,13 @@ command_mode_menu() {
 
 # 系统兼容性检测
 check_system_compatibility() {
-    echo -e "${BLUE}[1/6] 检测操作系统...${NC}"
+    echo -e "${BLUE}[1/8] 检测操作系统...${NC}"
+    
+    # 检测WSL环境
+    if [[ -f /proc/version ]] && grep -qi microsoft /proc/version; then
+        echo -e "${WHITE}环境:${NC} Windows Subsystem for Linux (WSL)"
+        print_success "WSL环境 - 支持运行"
+    fi
     
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
@@ -353,13 +359,13 @@ check_system_compatibility() {
                 print_warning "Ubuntu $VERSION_ID - 可能兼容，建议使用24.04"
             fi
         else
-            print_error "非Ubuntu系统，可能不兼容"
+            print_warning "非Ubuntu系统，可能不兼容"
         fi
     else
-        print_error "无法检测操作系统信息"
+        print_warning "无法检测操作系统信息"
     fi
     
-    echo -e "${BLUE}[2/6] 检测系统架构...${NC}"
+    echo -e "${BLUE}[2/8] 检测系统架构...${NC}"
     echo -e "${WHITE}架构:${NC} $ARCH"
     
     if [[ "$ARCH" == "x86_64" ]] || [[ "$ARCH" == "amd64" ]]; then
@@ -370,8 +376,15 @@ check_system_compatibility() {
         print_warning "未知架构 $ARCH - 可能不兼容"
     fi
     
-    echo -e "${BLUE}[3/6] 检测内存...${NC}"
-    local mem_total=$(free -m | awk 'NR==2{printf "%.0f", $2/1024}')
+    echo -e "${BLUE}[3/8] 检测内存...${NC}"
+    local mem_total=0
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        mem_total=$(sysctl -n hw.memsize | awk '{printf "%.0f", $1/1024/1024/1024}')
+    else
+        # Linux
+        mem_total=$(free -m | awk 'NR==2{printf "%.0f", $2/1024}')
+    fi
     echo -e "${WHITE}总内存:${NC} ${mem_total}GB"
     
     if [[ $mem_total -ge 2 ]]; then
@@ -380,8 +393,15 @@ check_system_compatibility() {
         print_error "内存不足 (<2GB)，建议至少2GB内存"
     fi
     
-    echo -e "${BLUE}[4/6] 检测磁盘空间...${NC}"
-    local disk_free=$(df -BG / | awk 'NR==2{print $4}' | sed 's/G//')
+    echo -e "${BLUE}[4/8] 检测磁盘空间...${NC}"
+    local disk_free=0
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        disk_free=$(df -g / | awk 'NR==2{print $4}')
+    else
+        # Linux
+        disk_free=$(df -BG / | awk 'NR==2{print $4}' | sed 's/G//')
+    fi
     echo -e "${WHITE}可用空间:${NC} ${disk_free}GB"
     
     if [[ $disk_free -ge 10 ]]; then
@@ -390,7 +410,7 @@ check_system_compatibility() {
         print_error "磁盘空间不足 (<10GB可用)，建议至少10GB可用空间"
     fi
     
-    echo -e "${BLUE}[5/6] 检测网络连接...${NC}"
+    echo -e "${BLUE}[5/8] 检测网络连接...${NC}"
     if curl -s --connect-timeout 5 https://www.google.com &> /dev/null; then
         print_success "外网连接正常"
     else
@@ -403,7 +423,7 @@ check_system_compatibility() {
         print_warning "Docker Hub连接可能有问题"
     fi
     
-    echo -e "${BLUE}[6/6] 检测必要工具...${NC}"
+    echo -e "${BLUE}[6/8] 检测必要工具...${NC}"
     local tools=("curl" "wget" "git" "unzip" "grep" "sed" "awk")
     local missing_tools=()
     
@@ -423,12 +443,128 @@ check_system_compatibility() {
         echo "请运行: sudo apt update && sudo apt install -y ${missing_tools[*]}"
     fi
     
+    echo -e "${BLUE}[7/8] 检测Dialog工具...${NC}"
+    if command -v dialog &> /dev/null; then
+        local dialog_version=$(dialog --version 2>/dev/null | head -1)
+        print_success "Dialog - 已安装"
+        echo -e "${WHITE}版本:${NC} $dialog_version"
+    else
+        print_error "Dialog - 未安装"
+        echo -e "${YELLOW}安装命令:${NC}"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo "  brew install dialog"
+        elif [[ -f /etc/debian_version ]]; then
+            echo "  sudo apt-get update && sudo apt-get install -y dialog"
+        elif [[ -f /etc/redhat-release ]]; then
+            echo "  sudo yum install -y dialog"
+        else
+            echo "  请根据您的系统手动安装dialog"
+        fi
+    fi
+    
+    echo -e "${BLUE}[8/8] 检测Docker环境...${NC}"
+    
+    # 检查Docker是否安装
+    if command -v docker &> /dev/null; then
+        local docker_version=$(docker --version 2>/dev/null | cut -d' ' -f3 | sed 's/,//')
+        print_success "Docker - 已安装"
+        echo -e "${WHITE}版本:${NC} $docker_version"
+        
+        # 检查Docker是否可用
+        if docker info > /dev/null 2>&1; then
+            print_success "Docker - 运行正常"
+        else
+            print_warning "Docker - 未运行或无法访问"
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                echo -e "${YELLOW}解决方法:${NC} 启动Docker Desktop应用"
+            elif [[ -f /proc/version ]] && grep -qi microsoft /proc/version; then
+                echo -e "${YELLOW}解决方法:${NC} 在Windows中启动Docker Desktop"
+            else
+                echo -e "${YELLOW}解决方法:${NC} 启动Docker服务"
+            fi
+        fi
+        
+        # 只在原生Linux系统下进行详细的服务检查
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            # 检查是否为WSL环境
+            local is_wsl=false
+            if [[ -f /proc/version ]] && grep -qi microsoft /proc/version 2>/dev/null; then
+                is_wsl=true
+            fi
+            
+            # 只在非WSL的Linux环境下进行systemctl检查
+            if [[ "$is_wsl" == "false" ]]; then
+            # 检查Docker服务状态
+            if systemctl is-active --quiet docker 2>/dev/null; then
+                print_success "Docker服务 - 正在运行"
+            else
+                print_warning "Docker服务 - 未运行"
+                echo -e "${YELLOW}启动命令:${NC} sudo systemctl start docker"
+            fi
+            
+            # 检查Docker开机自启动
+            if systemctl is-enabled docker &> /dev/null; then
+                local docker_autostart=$(systemctl is-enabled docker)
+                if [[ "$docker_autostart" == "enabled" ]]; then
+                    print_success "Docker开机自启动 - 已启用"
+                else
+                    print_warning "Docker开机自启动 - 已禁用"
+                    echo -e "${YELLOW}启用命令:${NC} sudo systemctl enable docker"
+                fi
+            else
+                print_warning "Docker开机自启动 - 状态未知"
+            fi
+            
+            # 检查当前用户是否在docker组
+            if groups $USER | grep -q docker; then
+                print_success "用户权限 - 已加入docker组"
+            else
+                print_warning "用户权限 - 未加入docker组"
+                echo -e "${YELLOW}添加命令:${NC} sudo usermod -aG docker $USER"
+                echo -e "${YELLOW}注意:${NC} 需要重新登录才能生效"
+            fi
+            fi
+        fi
+    else
+        print_error "Docker - 未安装"
+        echo -e "${YELLOW}安装命令:${NC}"
+        if [[ -f /proc/version ]] && grep -qi microsoft /proc/version; then
+            echo "  WSL环境: 请在Windows中安装Docker Desktop"
+        else
+            echo "  curl -fsSL https://get.docker.com -o get-docker.sh"
+            echo "  sudo sh get-docker.sh"
+            echo "  sudo usermod -aG docker $USER"
+        fi
+    fi
+    
+    # 检查Docker Compose是否安装
+    if command -v docker-compose &> /dev/null; then
+        local compose_version=$(docker-compose --version 2>/dev/null | cut -d' ' -f3 | sed 's/,//')
+        print_success "Docker Compose - 已安装"
+        echo -e "${WHITE}版本:${NC} $compose_version"
+    elif docker compose version &> /dev/null; then
+        local compose_version=$(docker compose version --short 2>/dev/null)
+        print_success "Docker Compose (插件) - 已安装"
+        echo -e "${WHITE}版本:${NC} $compose_version"
+    else
+        print_error "Docker Compose - 未安装"
+        echo -e "${YELLOW}安装命令:${NC}"
+        if [[ -f /proc/version ]] && grep -qi microsoft /proc/version; then
+            echo "  WSL环境: Docker Compose通常随Docker Desktop一起安装"
+        else
+            echo "  sudo curl -L \"https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose"
+            echo "  sudo chmod +x /usr/local/bin/docker-compose"
+        fi
+    fi
+    
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${WHITE}🎯 建议:${NC}"
     echo "1. 如果所有检测都通过，可以安全运行安装"
     echo "2. 如果有警告，建议先解决问题再安装"
     echo "3. 如果有错误，必须解决问题后才能安装"
+    echo "4. Dialog未安装时，脚本将使用命令行模式"
+    echo "5. Docker未安装时，安装过程会自动安装Docker"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
@@ -2527,8 +2663,11 @@ show_help() {
     echo "- x86_64 或 ARM64 架构"
     echo "- 至少2GB内存"
     echo "- 至少10GB可用磁盘空间"
-    echo "- Node.js 22.x"
-    echo "- pnpm 10.x"
+    echo "- Docker 24.x+"
+    echo "- Docker Compose 2.x+"
+    echo "- Dialog (可选，用于图形化界面)"
+    echo "- Node.js 22.x (前端构建)"
+    echo "- pnpm 10.x (前端构建)"
     echo ""
     echo -e "${BLUE}🌐 访问地址:${NC}"
     echo "- 后端API: http://服务器IP:9501"
