@@ -231,7 +231,7 @@ show_command_menu() {
     echo "  ./docker/mineadmin.sh generate-config - 交互式生成配置"
     echo "  ./docker/mineadmin.sh password - 修改密码"
     echo "  ./docker/mineadmin.sh info     - 查看配置信息"
-    echo "  ./docker/mineadmin.sh plugins  - 查看已安装插件"
+    echo "  ./docker/mineadmin.sh plugins  - 插件管理（扫描/安装/卸载）"
     echo ""
     echo -e "${MAGENTA}📦 容器管理:${NC}"
     echo "  ./docker/mineadmin.sh export   - 容器导出功能"
@@ -299,7 +299,7 @@ command_mode_menu() {
     echo "  hook generate-config - 交互式生成配置"
     echo "  hook password - 修改密码"
     echo "  hook info     - 查看配置信息"
-    echo "  hook plugins  - 查看已安装插件"
+    echo "  hook plugins  - 插件管理（扫描/安装/卸载）"
     echo ""
     echo -e "${MAGENTA}📦 容器管理:${NC}"
     echo "  hook export   - 容器导出功能"
@@ -831,20 +831,47 @@ show_service_status() {
 
 # Dialog查看容器日志
 show_container_logs() {
+    # 检查Dialog是否可用
+    if ! command -v dialog &> /dev/null; then
+        print_warning "Dialog不可用，使用命令行模式查看日志"
+        show_container_logs_cli
+        return
+    fi
+    
     local containers=("MySQL" "Redis" "Server App" "Web Prod")
     local services=("mysql" "redis" "server-app" "web-prod")
     
     # 创建临时文件存储选择
     local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_logs$$
     
+    # 检查终端大小
+    local term_height=$(tput lines 2>/dev/null || echo 24)
+    local term_width=$(tput cols 2>/dev/null || echo 80)
+    
+    # 计算合适的菜单大小
+    local menu_height=$((term_height - 4))
+    local menu_width=$((term_width - 4))
+    
+    # 确保最小尺寸
+    if [ $menu_height -lt 8 ]; then
+        menu_height=8
+    fi
+    if [ $menu_width -lt 50 ]; then
+        menu_width=50
+    fi
+    
     # 显示容器选择菜单
-    dialog --title "查看容器日志" \
-           --backtitle "MineAdmin 管理工具" \
-           --menu "请选择要查看的容器日志：" 12 50 8 \
-           1 "MySQL" \
-           2 "Redis" \
-           3 "Server App" \
-           4 "Web Prod" 2> "$tempfile"
+    if ! dialog --title "查看容器日志" \
+               --backtitle "MineAdmin 管理工具" \
+               --menu "请选择要查看的容器日志：" $menu_height $menu_width 8 \
+               1 "MySQL" \
+               2 "Redis" \
+               3 "Server App" \
+               4 "Web Prod" 2> "$tempfile"; then
+        print_warning "Dialog菜单显示失败，使用命令行模式"
+        show_container_logs_cli
+        return
+    fi
     
     # 读取选择结果
     local choice=$(cat "$tempfile" 2>/dev/null)
@@ -855,11 +882,124 @@ show_container_logs() {
         local container_name="${containers[$idx]}"
         local service_name="${services[$idx]}"
         
-        # 切换到项目目录并显示日志
+        # 切换到项目目录
         cd "$PROJECT_ROOT"
-        dialog --title "容器日志 - $container_name" \
-               --backtitle "MineAdmin 管理工具" \
-               --textbox <(docker-compose -f docker/docker-compose.yml --env-file server-app/.env logs "$service_name") 20 80
+        
+        # 检查服务是否运行
+        if ! docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps | grep -q "$service_name.*Up"; then
+            dialog --title "错误" \
+                   --backtitle "MineAdmin 管理工具" \
+                   --msgbox "服务 $service_name 未运行，无法查看日志" 8 60
+            return 1
+        fi
+        
+        # 创建临时日志文件
+        local log_tempfile=$(mktemp 2>/dev/null) || log_tempfile=/tmp/mineadmin_log_${service_name}$$
+        
+        # 获取容器日志并保存到临时文件
+        print_info "正在获取 $container_name 的日志..."
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env logs "$service_name" > "$log_tempfile" 2>&1
+        
+        # 检查日志文件是否为空
+        if [ ! -s "$log_tempfile" ]; then
+            echo "暂无日志内容" > "$log_tempfile"
+        fi
+        
+        # 检查终端大小
+        local term_height=$(tput lines 2>/dev/null || echo 24)
+        local term_width=$(tput cols 2>/dev/null || echo 80)
+        
+        # 计算合适的对话框大小
+        local dialog_height=$((term_height - 4))
+        local dialog_width=$((term_width - 4))
+        
+        # 确保最小尺寸
+        if [ $dialog_height -lt 10 ]; then
+            dialog_height=10
+        fi
+        if [ $dialog_width -lt 40 ]; then
+            dialog_width=40
+        fi
+        
+        # 显示日志
+        if ! dialog --title "容器日志 - $container_name" \
+                   --backtitle "MineAdmin 管理工具" \
+                   --textbox "$log_tempfile" $dialog_height $dialog_width 2>/dev/null; then
+            print_warning "Dialog显示失败，使用命令行模式显示日志"
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            cat "$log_tempfile"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        fi
+        
+        # 清理临时文件
+        rm -f "$log_tempfile"
+    else
+        # 如果没有选择（Dialog不可用或用户取消），显示命令行版本的日志查看
+        show_container_logs_cli
+    fi
+}
+
+# 命令行版本查看容器日志
+show_container_logs_cli() {
+    echo -e "${WHITE}容器日志查看${NC}"
+    echo ""
+    
+    cd "$PROJECT_ROOT"
+    
+    # 检查容器是否运行
+    if ! docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps | grep -q "Up"; then
+        print_error "没有运行中的容器，无法查看日志"
+        return 1
+    fi
+    
+    local containers=("MySQL" "Redis" "Server App" "Web Prod")
+    local services=("mysql" "redis" "server-app" "web-prod")
+    
+    echo -e "${WHITE}可用的容器服务:${NC}"
+    echo ""
+    for i in "${!containers[@]}"; do
+        local service_name="${services[$i]}"
+        local container_name="${containers[$i]}"
+        
+        # 检查服务是否运行
+        if docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps | grep -q "$service_name.*Up"; then
+            echo -e "${GREEN}  $((i+1))) $container_name (运行中)${NC}"
+        else
+            echo -e "${RED}  $((i+1))) $container_name (未运行)${NC}"
+        fi
+    done
+    echo ""
+    
+    echo -e "${CYAN}请选择要查看的容器日志 (1-${#containers[@]})，或输入 'all' 查看所有日志:${NC}"
+    read -r choice
+    
+    if [[ "$choice" == "all" ]]; then
+        # 查看所有运行中的容器日志
+        echo ""
+        print_info "正在获取所有容器的日志..."
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env logs
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    elif [[ "$choice" =~ ^[1-4]$ ]]; then
+        local idx=$((choice-1))
+        local container_name="${containers[$idx]}"
+        local service_name="${services[$idx]}"
+        
+        # 检查服务是否运行
+        if ! docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps | grep -q "$service_name.*Up"; then
+            print_error "服务 $service_name 未运行，无法查看日志"
+            return 1
+        fi
+        
+        echo ""
+        print_info "正在获取 $container_name 的日志..."
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        docker-compose -f docker/docker-compose.yml --env-file server-app/.env logs "$service_name"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    else
+        print_info "取消查看日志"
+        return 0
     fi
 }
 
@@ -1359,26 +1499,241 @@ build_frontend() {
 
 # 查看已安装插件
 show_installed_plugins() {
-    echo -e "${WHITE}已安装的插件:${NC}"
+    echo -e "${WHITE}插件管理${NC}"
     echo ""
     
     cd "$PROJECT_ROOT"
     
     # 检查容器是否运行
     if ! docker-compose -f docker/docker-compose.yml --env-file server-app/.env ps | grep -q "server-app.*Up"; then
-        print_error "后端服务未运行，无法查看插件"
+        print_error "后端服务未运行，无法管理插件"
         return 1
     fi
     
-    print_info "正在获取已安装插件列表..."
+    print_info "正在扫描本地插件目录..."
     
-    # 执行命令获取已安装插件
-    docker-compose -f docker/docker-compose.yml --env-file server-app/.env exec -T server-app swoole-cli bin/hyperf.php mine-extension:list 2>/dev/null || {
-        print_warning "无法获取插件列表，可能没有安装插件或命令不存在"
+    # 扫描插件目录
+    local plugin_dir="$PROJECT_ROOT/server-app/plugin"
+    local plugins=()
+    local installed_plugins=()
+    local uninstalled_plugins=()
+    
+    # 检查插件目录是否存在
+    if [ ! -d "$plugin_dir" ]; then
+        print_warning "插件目录不存在: $plugin_dir"
         echo ""
-        echo -e "${WHITE}手动查看插件目录:${NC}"
-        docker-compose -f docker/docker-compose.yml --env-file server-app/.env exec -T server-app ls -la /app/plugin/ 2>/dev/null || echo "插件目录不存在"
-    }
+        echo -e "${WHITE}创建插件目录:${NC}"
+        mkdir -p "$plugin_dir"
+        print_success "插件目录已创建"
+        return 0
+    fi
+    
+    # 扫描插件目录
+    while IFS= read -r -d '' plugin_path; do
+        if [ -d "$plugin_path" ]; then
+            # 获取插件标识（作者/插件名）
+            local relative_path="${plugin_path#$plugin_dir/}"
+            if [[ "$relative_path" =~ ^[^/]+/[^/]+$ ]]; then
+                plugins+=("$relative_path")
+                
+                # 检查是否已安装（存在install.lock文件）
+                if [ -f "$plugin_path/install.lock" ]; then
+                    installed_plugins+=("$relative_path")
+                else
+                    uninstalled_plugins+=("$relative_path")
+                fi
+            fi
+        fi
+    done < <(find "$plugin_dir" -mindepth 2 -maxdepth 2 -type d -print0 2>/dev/null)
+    
+    # 显示扫描结果
+    echo -e "${WHITE}扫描结果:${NC}"
+    echo -e "${GREEN}已安装插件:${NC} ${#installed_plugins[@]} 个"
+    echo -e "${YELLOW}未安装插件:${NC} ${#uninstalled_plugins[@]} 个"
+    echo -e "${BLUE}总插件数:${NC} ${#plugins[@]} 个"
+    echo ""
+    
+    # 显示已安装插件
+    if [ ${#installed_plugins[@]} -gt 0 ]; then
+        echo -e "${GREEN}已安装的插件:${NC}"
+        for plugin in "${installed_plugins[@]}"; do
+            echo "  ✅ $plugin"
+        done
+        echo ""
+    fi
+    
+    # 显示未安装插件
+    if [ ${#uninstalled_plugins[@]} -gt 0 ]; then
+        echo -e "${YELLOW}未安装的插件:${NC}"
+        for plugin in "${uninstalled_plugins[@]}"; do
+            echo "  ⏳ $plugin"
+        done
+        echo ""
+    fi
+    
+    # 如果没有找到插件
+    if [ ${#plugins[@]} -eq 0 ]; then
+        print_warning "未找到任何插件"
+        echo ""
+        echo -e "${WHITE}插件目录结构示例:${NC}"
+        echo "  $plugin_dir/"
+        echo "  ├── author1/"
+        echo "  │   └── plugin1/"
+        echo "  │       ├── install.lock  (已安装)"
+        echo "  │       └── ..."
+        echo "  └── author2/"
+        echo "      └── plugin2/"
+        echo "          └── ...  (未安装)"
+        return 0
+    fi
+    
+    # 询问是否要管理插件
+    echo -e "${CYAN}是否要安装/卸载插件？(y/N):${NC}"
+    read -r manage_plugins
+    
+    if [[ ! "$manage_plugins" =~ ^[Yy]$ ]]; then
+        print_info "插件管理已取消"
+        return 0
+    fi
+    
+    # 调用插件管理函数
+    manage_plugins_dialog "${plugins[@]}"
+}
+
+# 插件管理对话框
+manage_plugins_dialog() {
+    local plugins=("$@")
+    local plugin_dir="$PROJECT_ROOT/server-app/plugin"
+    
+    # 创建临时文件存储选择
+    local tempfile=$(mktemp 2>/dev/null) || tempfile=/tmp/mineadmin_plugins$$
+    
+    # 构建插件选择菜单选项
+    local menu_options=()
+    for plugin in "${plugins[@]}"; do
+        local plugin_path="$plugin_dir/$plugin"
+        local status=""
+        local description=""
+        
+        # 检查安装状态
+        if [ -f "$plugin_path/install.lock" ]; then
+            status="[已安装]"
+            description="✅ $plugin $status"
+        else
+            status="[未安装]"
+            description="⏳ $plugin $status"
+        fi
+        
+        menu_options+=("$plugin" "$description" "off")
+    done
+    
+    # 显示插件选择菜单
+    dialog --title "插件管理" \
+           --backtitle "MineAdmin 管理工具" \
+           --checklist "请选择要管理的插件（空格选择，回车确认）：\n\n✅ 已安装的插件\n⏳ 未安装的插件" 20 80 15 \
+           "${menu_options[@]}" 2> "$tempfile"
+    
+    # 读取选择结果
+    local selected_plugins=$(cat "$tempfile" 2>/dev/null)
+    rm -f "$tempfile"
+    
+    if [ -z "$selected_plugins" ]; then
+        print_info "取消插件管理"
+        return
+    fi
+    
+    # 处理选中的插件
+    local install_plugins=()
+    local uninstall_plugins=()
+    
+    for plugin in $selected_plugins; do
+        local plugin_path="$plugin_dir/$plugin"
+        
+        if [ -f "$plugin_path/install.lock" ]; then
+            # 已安装的插件，需要先卸载
+            uninstall_plugins+=("$plugin")
+        else
+            # 未安装的插件，需要安装
+            install_plugins+=("$plugin")
+        fi
+    done
+    
+    # 显示操作预览
+    echo -e "${WHITE}操作预览:${NC}"
+    echo ""
+    
+    if [ ${#uninstall_plugins[@]} -gt 0 ]; then
+        echo -e "${RED}将要卸载的插件:${NC}"
+        for plugin in "${uninstall_plugins[@]}"; do
+            echo "  ❌ $plugin"
+        done
+        echo ""
+    fi
+    
+    if [ ${#install_plugins[@]} -gt 0 ]; then
+        echo -e "${GREEN}将要安装的插件:${NC}"
+        for plugin in "${install_plugins[@]}"; do
+            echo "  ✅ $plugin"
+        done
+        echo ""
+    fi
+    
+    # 确认操作
+    echo -e "${YELLOW}确认执行以上操作？(y/N):${NC}"
+    read -r confirm_operation
+    
+    if [[ ! "$confirm_operation" =~ ^[Yy]$ ]]; then
+        print_info "插件管理操作已取消"
+        return
+    fi
+    
+    # 执行卸载操作
+    if [ ${#uninstall_plugins[@]} -gt 0 ]; then
+        echo ""
+        print_info "开始卸载插件..."
+        
+        for plugin in "${uninstall_plugins[@]}"; do
+            echo -e "${BLUE}卸载插件:${NC} $plugin"
+            
+            # 执行卸载命令
+            if docker-compose -f docker/docker-compose.yml --env-file server-app/.env exec -T server-app swoole-cli bin/hyperf.php mine-extension:uninstall "$plugin" -y 2>/dev/null; then
+                print_success "插件卸载成功: $plugin"
+            else
+                print_error "插件卸载失败: $plugin"
+            fi
+        done
+        echo ""
+    fi
+    
+    # 执行安装操作
+    if [ ${#install_plugins[@]} -gt 0 ]; then
+        echo ""
+        print_info "开始安装插件..."
+        
+        for plugin in "${install_plugins[@]}"; do
+            echo -e "${BLUE}安装插件:${NC} $plugin"
+            
+            # 执行安装命令
+            if docker-compose -f docker/docker-compose.yml --env-file server-app/.env exec -T server-app swoole-cli bin/hyperf.php mine-extension:install "$plugin" -y 2>/dev/null; then
+                print_success "插件安装成功: $plugin"
+            else
+                print_error "插件安装失败: $plugin"
+            fi
+        done
+        echo ""
+    fi
+    
+    print_success "插件管理操作完成！"
+    echo ""
+    
+    # 询问是否刷新插件状态
+    echo -e "${CYAN}是否刷新插件状态？(y/N):${NC}"
+    read -r refresh_status
+    
+    if [[ "$refresh_status" =~ ^[Yy]$ ]]; then
+        echo ""
+        show_installed_plugins
+    fi
 }
 
 # 设置开机自启动
@@ -2639,7 +2994,7 @@ show_help() {
     echo "- 交互式生成配置: hook generate-config"
     echo "- 修改密码: hook password"
     echo "- 查看配置信息: hook info"
-    echo "- 查看已安装插件: hook plugins"
+    echo "- 插件管理（扫描/安装/卸载）: hook plugins"
     echo "- 查看网络连接: hook network"
     echo ""
     echo -e "${BLUE}📦 容器管理:${NC}"
