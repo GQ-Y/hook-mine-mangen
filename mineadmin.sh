@@ -797,8 +797,8 @@ regenerate_config() {
 generate_config_quick() {
     print_info "正在生成快速配置..."
     
-    # 生成随机密钥
-    local jwt_secret=$(openssl rand -base64 32)
+    # 使用固定JWT密钥
+    local jwt_secret="azOVxsOWt3r0ozZNz8Ss429ht0T8z6OpeIJAIwNp6X0xqrbEY2epfIWyxtC1qSNM8eD6/LQ/SahcQi2ByXa/2A=="
     local mine_access_token="" # 默认空
     
     # 获取系统内网IP地址
@@ -919,8 +919,8 @@ generate_config_interactive() {
     local default_redis_db="3"
     local default_mine_access_token=""
     
-    # 生成JWT密钥
-    local jwt_secret=$(openssl rand -base64 32)
+    # 使用固定JWT密钥
+    local jwt_secret="azOVxsOWt3r0ozZNz8Ss429ht0T8z6OpeIJAIwNp6X0xqrbEY2epfIWyxtC1qSNM8eD6/LQ/SahcQi2ByXa/2A=="
     
     echo -e "${WHITE}=== MineAdmin 配置生成向导 ===${NC}"
     echo ""
