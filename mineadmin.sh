@@ -410,6 +410,7 @@ command_mode_menu() {
     echo ""
     echo -e "${MAGENTA}📥 项目初始化:${NC}"
     echo "  hook init      - 从官方仓库初始化项目"
+    echo "  hook init-hook - 从Hook仓库初始化项目"
     echo ""
     echo -e "${MAGENTA}🧹 清理维护:${NC}"
     echo "  hook clean    - 清理Docker缓存"
@@ -2008,6 +2009,210 @@ init_mineadmin_project() {
         fi
     else
         print_error "项目结构初始化失败"
+        return 1
+    fi
+}
+
+# 从Hook仓库初始化项目
+init_hook_project() {
+    echo -e "${WHITE}🚀 Hook项目初始化${NC}"
+    echo ""
+    
+    # 检查是否为root用户
+    if [[ $EUID -eq 0 ]]; then
+        print_error "请不要使用root用户运行此脚本"
+        return 1
+    fi
+    
+    # 第一步：检查Git是否安装
+    echo -e "${BLUE}[1/6] 正在检测本机环境...${NC}"
+    if ! command -v git &> /dev/null; then
+        print_error "Git未安装，请先安装Git"
+        echo -e "${YELLOW}安装命令:${NC}"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo "  brew install git"
+        elif [[ -f /etc/debian_version ]]; then
+            echo "  sudo apt-get update && sudo apt-get install -y git"
+        elif [[ -f /etc/redhat-release ]]; then
+            echo "  sudo yum install -y git"
+        else
+            echo "  请根据您的系统手动安装Git"
+        fi
+        return 1
+    fi
+    
+    local git_version=$(git --version 2>/dev/null | cut -d' ' -f3)
+    print_success "Git已安装，版本: $git_version"
+    
+    # 第二步：检查网络连接
+    echo -e "${BLUE}[2/6] 正在尝试访问GitHub...${NC}"
+    local github_url="https://github.com"
+    local gitee_url="https://gitee.com"
+    local use_github=true
+    
+    if curl -s --connect-timeout 5 "$github_url" &> /dev/null; then
+        print_success "GitHub访问正常，使用GitHub仓库"
+        use_github=true
+    else
+        print_warning "GitHub访问失败，尝试使用Gitee仓库"
+        if curl -s --connect-timeout 5 "$gitee_url" &> /dev/null; then
+            print_success "Gitee访问正常，使用Gitee仓库"
+            use_github=false
+        else
+            print_error "GitHub和Gitee都无法访问，请检查网络连接"
+            return 1
+        fi
+    fi
+    
+    # 设置仓库地址
+    local backend_repo_url=""
+    local frontend_repo_url=""
+    local backend_repo_name=""
+    local frontend_repo_name=""
+    
+    if [ "$use_github" = true ]; then
+        backend_repo_url="https://github.com/GQ-Y/miniserver.git"
+        frontend_repo_url="https://github.com/GQ-Y/miniweb.git"
+        backend_repo_name="miniserver-GitHub"
+        frontend_repo_name="miniweb-GitHub"
+    else
+        # 如果GitHub不可用，提示用户手动配置Gitee镜像
+        print_warning "GitHub不可用，但Hook仓库目前仅在GitHub上可用"
+        echo -e "${YELLOW}请确保能够访问GitHub，或者手动配置Gitee镜像仓库${NC}"
+        echo -e "${YELLOW}是否继续尝试从GitHub拉取？(y/N):${NC}"
+        read -r confirm_github
+        if [[ ! "$confirm_github" =~ ^[Yy]$ ]]; then
+            print_info "初始化已取消"
+            return 0
+        fi
+        backend_repo_url="https://github.com/GQ-Y/miniserver.git"
+        frontend_repo_url="https://github.com/GQ-Y/miniweb.git"
+        backend_repo_name="miniserver-GitHub"
+        frontend_repo_name="miniweb-GitHub"
+    fi
+    
+    # 第三步：检查当前目录状态
+    echo -e "${BLUE}[3/6] 检查当前目录状态...${NC}"
+    local current_dir=$(pwd)
+    local parent_dir=$(dirname "$current_dir")
+    
+    # 检查是否在正确的目录结构中
+    if [[ "$current_dir" == */docker ]]; then
+        print_info "当前在docker目录，切换到上级目录"
+        cd "$parent_dir"
+    fi
+    
+    # 检查是否已存在server-app或web目录
+    if [ -d "server-app" ] || [ -d "web" ]; then
+        print_warning "检测到已存在的server-app或web目录"
+        echo -e "${YELLOW}是否继续？这将覆盖现有文件 (y/N):${NC}"
+        read -r confirm_overwrite
+        if [[ ! "$confirm_overwrite" =~ ^[Yy]$ ]]; then
+            print_info "初始化已取消"
+            return 0
+        fi
+        
+        # 备份现有目录
+        if [ -d "server-app" ]; then
+            print_info "备份现有server-app目录..."
+            mv server-app server-app-backup-$(date +%Y%m%d_%H%M%S)
+        fi
+        if [ -d "web" ]; then
+            print_info "备份现有web目录..."
+            mv web web-backup-$(date +%Y%m%d_%H%M%S)
+        fi
+    fi
+    
+    # 第四步：拉取后端源码
+    echo -e "${BLUE}[4/6] 正在拉取后端源码...${NC}"
+    print_info "从 $backend_repo_url 拉取后端代码..."
+    
+    # 创建临时目录
+    local temp_dir=$(mktemp -d 2>/dev/null) || temp_dir="/tmp/hook_init_$$"
+    
+    if git clone "$backend_repo_url" "$temp_dir/$backend_repo_name" 2>/dev/null; then
+        print_success "后端代码拉取成功"
+    else
+        print_error "后端代码拉取失败"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # 第五步：拉取前端源码
+    echo -e "${BLUE}[5/6] 正在拉取前端源码...${NC}"
+    print_info "从 $frontend_repo_url 拉取前端代码..."
+    
+    if git clone "$frontend_repo_url" "$temp_dir/$frontend_repo_name" 2>/dev/null; then
+        print_success "前端代码拉取成功"
+    else
+        print_error "前端代码拉取失败"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # 第六步：初始化项目结构
+    echo -e "${BLUE}[6/6] 正在初始化项目结构...${NC}"
+    
+    local backend_dir="$temp_dir/$backend_repo_name"
+    local frontend_dir="$temp_dir/$frontend_repo_name"
+    
+    # 检查克隆的目录结构
+    if [ ! -d "$backend_dir" ] || [ ! -d "$frontend_dir" ]; then
+        print_error "克隆的目录不存在"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    
+    # 重命名后端目录为server-app
+    print_info "重命名后端目录为server-app..."
+    mv "$backend_dir" "server-app"
+    
+    # 重命名前端目录为web
+    print_info "重命名前端目录为web..."
+    mv "$frontend_dir" "web"
+    
+    # 清理临时目录
+    rm -rf "$temp_dir"
+    
+    # 验证最终结构
+    if [ -d "server-app" ] && [ -d "web" ] && [ -d "docker" ]; then
+        print_success "Hook项目结构初始化完成！"
+        echo ""
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${WHITE}📁 项目结构:${NC}"
+        echo "  ✅ server-app/ - Hook后端应用"
+        echo "  ✅ web/        - Hook前端应用"
+        echo "  ✅ docker/     - Docker配置"
+        echo ""
+        echo -e "${WHITE}🎯 下一步操作:${NC}"
+        echo "  1. 运行 'hook check' 检查系统兼容性"
+        echo "  2. 运行 'hook install' 安装部署"
+        echo "  3. 运行 'hook build' 构建前端"
+        echo "  4. 运行 'hook start' 启动服务"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        
+        # 显示仓库信息
+        if [ -d "server-app/.git" ]; then
+            echo ""
+            echo -e "${WHITE}📋 后端仓库信息:${NC}"
+            cd server-app
+            echo "  远程仓库: $(git remote get-url origin 2>/dev/null || echo '未知')"
+            echo "  当前分支: $(git branch --show-current 2>/dev/null || echo '未知')"
+            echo "  最新提交: $(git log -1 --pretty=format:'%h - %s (%cr)' 2>/dev/null || echo '未知')"
+            cd ..
+        fi
+        
+        if [ -d "web/.git" ]; then
+            echo ""
+            echo -e "${WHITE}📋 前端仓库信息:${NC}"
+            cd web
+            echo "  远程仓库: $(git remote get-url origin 2>/dev/null || echo '未知')"
+            echo "  当前分支: $(git branch --show-current 2>/dev/null || echo '未知')"
+            echo "  最新提交: $(git log -1 --pretty=format:'%h - %s (%cr)' 2>/dev/null || echo '未知')"
+            cd ..
+        fi
+    else
+        print_error "Hook项目结构初始化失败"
         return 1
     fi
 }
@@ -5302,6 +5507,7 @@ show_help() {
     echo ""
     echo -e "${BLUE}📥 项目初始化:${NC}"
     echo "- 从官方仓库初始化项目: hook init"
+    echo "- 从Hook仓库初始化项目: hook init-hook"
     echo ""
     echo -e "${BLUE}🧹 清理维护:${NC}"
     echo "- 清理Docker缓存: hook clean"
@@ -5398,6 +5604,9 @@ handle_hook_command() {
             ;;
         init)
             init_mineadmin_project
+            ;;
+        init-hook)
+            init_hook_project
             ;;
         autostart)
             setup_autostart
