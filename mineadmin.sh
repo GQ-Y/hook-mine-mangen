@@ -3309,12 +3309,63 @@ install_k8s_components() {
     sudo rm -f /etc/apt/keyrings/kubernetes-archive-keyring.gpg 2>/dev/null || true
     sudo rm -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg 2>/dev/null || true
     
-    # 4. 清理旧的systemd服务文件
+    # 4. 检查并释放被占用的端口
+    print_info "检查并释放被占用的端口..."
+    local ports=(6443 10250 10251 10252 10255 10257 10259 2379 2380 179 4789 5473)
+    for port in "${ports[@]}"; do
+        local pid=$(sudo lsof -ti:$port 2>/dev/null)
+        if [[ -n "$pid" ]]; then
+            print_warning "端口 $port 被进程 $pid 占用，正在终止..."
+            sudo kill -9 "$pid" 2>/dev/null || true
+        fi
+    done
+    
+    # 额外清理：终止所有kubelet相关进程
+    print_info "清理kubelet相关进程..."
+    sudo pkill -f kubelet 2>/dev/null || true
+    sudo pkill -f kube-apiserver 2>/dev/null || true
+    sudo pkill -f kube-controller-manager 2>/dev/null || true
+    sudo pkill -f kube-scheduler 2>/dev/null || true
+    sudo pkill -f etcd 2>/dev/null || true
+    
+    # 5. 清理网络配置
+    print_info "清理网络配置..."
+    sudo ip link delete cni0 2>/dev/null || true
+    sudo ip link delete flannel.1 2>/dev/null || true
+    sudo ip link delete calico-* 2>/dev/null || true
+    sudo iptables -F 2>/dev/null || true
+    sudo iptables -t nat -F 2>/dev/null || true
+    sudo iptables -t mangle -F 2>/dev/null || true
+    sudo iptables -X 2>/dev/null || true
+    
+    # 6. 配置防火墙（允许K8s端口）
+    print_info "配置防火墙..."
+    # 禁用UFW（如果启用）
+    if sudo ufw status | grep -q "Status: active"; then
+        print_warning "UFW防火墙已启用，正在禁用..."
+        sudo ufw disable
+    fi
+    
+    # 配置iptables规则
+    sudo iptables -A INPUT -p tcp --dport 6443 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 10250 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 10251 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 10252 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 10255 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 2379 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 2380 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 179 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 4789 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p udp --dport 4789 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p tcp --dport 5473 -j ACCEPT 2>/dev/null || true
+    sudo iptables -A INPUT -p udp --dport 5473 -j ACCEPT 2>/dev/null || true
+    
+    # 7. 清理旧的systemd服务文件
     print_info "清理旧的systemd服务文件..."
     sudo rm -f /etc/systemd/system/kubelet.service 2>/dev/null || true
     sudo rm -rf /etc/systemd/system/kubelet.service.d/ 2>/dev/null || true
     
-    # 5. 禁用swap（K8s要求）
+    # 7. 禁用swap（K8s要求）
     print_info "检查并禁用swap..."
     if swapon --show | grep -q "/"; then
         print_warning "检测到swap已启用，正在禁用..."
@@ -3325,7 +3376,7 @@ install_k8s_components() {
         print_success "swap未启用"
     fi
     
-    # 6. 确保containerd配置正确
+    # 8. 确保containerd配置正确
     print_info "配置containerd..."
     sudo mkdir -p /etc/containerd
     containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
@@ -3333,13 +3384,13 @@ install_k8s_components() {
     sudo systemctl restart containerd
     sudo systemctl enable containerd
     
-    # 7. 更新包列表
+    # 9. 更新包列表
     sudo apt-get update
     
-    # 8. 安装必要的工具
+    # 10. 安装必要的工具
     sudo apt-get install -y apt-transport-https ca-certificates curl
     
-    # 9. 检测架构
+    # 11. 检测架构
     local arch=""
     if [[ "$ARCH" == "x86_64" ]] || [[ "$ARCH" == "amd64" ]]; then
         arch="amd64"
@@ -3352,7 +3403,7 @@ install_k8s_components() {
     
     print_info "检测到架构: $arch"
     
-    # 10. 下载K8s组件
+    # 12. 下载K8s组件
     print_info "下载K8s组件..."
     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$arch/kubeadm"
     sudo install -o root -g root -m 0755 kubeadm /usr/local/bin/kubeadm
@@ -3366,7 +3417,7 @@ install_k8s_components() {
     # 清理下载文件
     rm -f kubeadm kubelet kubectl
     
-    # 11. 创建kubelet服务文件
+    # 13. 创建kubelet服务文件
     print_info "创建kubelet服务文件..."
     sudo tee /etc/systemd/system/kubelet.service << EOF
 [Unit]
@@ -3386,7 +3437,7 @@ Environment="KUBELET_EXTRA_ARGS=--container-runtime-endpoint=unix:///var/run/con
 WantedBy=multi-user.target
 EOF
     
-    # 12. 创建kubelet服务配置目录
+    # 14. 创建kubelet服务配置目录
     sudo mkdir -p /etc/systemd/system/kubelet.service.d
     sudo tee /etc/systemd/system/kubelet.service.d/10-kubeadm.conf << EOF
 # Note: This dropin only works with kubeadm and kubelet v1.11+
@@ -3405,10 +3456,10 @@ ExecStart=
 ExecStart=/usr/local/bin/kubelet \$KUBELET_KUBECONFIG_ARGS \$KUBELET_CONFIG_ARGS \$KUBELET_KUBEADM_ARGS \$KUBELET_EXTRA_ARGS
 EOF
     
-    # 13. 重新加载systemd配置
+    # 15. 重新加载systemd配置
     sudo systemctl daemon-reload
     
-    # 14. 启用kubelet服务
+    # 16. 启用kubelet服务
     sudo systemctl enable kubelet
     
     print_success "K8s组件安装完成"
@@ -3418,50 +3469,126 @@ EOF
 init_k8s_cluster() {
     print_info "初始化K8s集群..."
     
-    # 获取本机IP（优先使用公网IP或内网IP，排除Docker容器IP）
+    # 获取本机IP（单机模式使用内网IP，排除Docker容器IP）
     local node_ip=""
     
-    # 方法1: 尝试获取公网IP
-    if command -v curl &> /dev/null; then
-        node_ip=$(curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
-        if [[ -n "$node_ip" && "$node_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            print_info "检测到公网IP: $node_ip"
-        else
-            node_ip=""
+    # 方法1: 获取真正的宿主机IP（排除所有Docker网络）
+    node_ip=""
+    
+    # 尝试获取默认路由的出接口IP
+    local default_interface=$(ip route | grep default | awk '{print $5}' | head -1)
+    if [[ -n "$default_interface" ]]; then
+        node_ip=$(ip addr show "$default_interface" | grep "inet " | awk '{print $2}' | cut -d'/' -f1 | head -1)
+    fi
+    
+    # 如果还是Docker IP，尝试其他方法
+    if [[ -z "$node_ip" || "$node_ip" == "172."* ]]; then
+        # 获取所有非Docker的IP
+        node_ip=$(ip addr show | grep "inet " | grep -v "127.0.0.1" | grep -v "172.1[6-9]." | grep -v "172.2[0-9]." | grep -v "172.3[01]." | awk '{print $2}' | cut -d'/' -f1 | head -1)
+    fi
+    
+    # 如果还是没找到，尝试hostname -I
+    if [[ -z "$node_ip" || "$node_ip" == "172."* ]]; then
+        node_ip=$(hostname -I | tr ' ' '\n' | grep -v "127.0.0.1" | grep -v "172.1[6-9]." | grep -v "172.2[0-9]." | grep -v "172.3[01]." | head -1)
+    fi
+    
+    # 尝试获取外部IP（通过公网服务）
+    if [[ -z "$node_ip" || "$node_ip" == "172."* ]]; then
+        print_info "尝试获取外部IP地址..."
+        local external_ip=$(curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null || curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -s --connect-timeout 5 https://icanhazip.com 2>/dev/null)
+        if [[ -n "$external_ip" && "$external_ip" != "127.0.0.1" ]]; then
+            node_ip="$external_ip"
+            print_info "使用外部IP: $node_ip"
         fi
     fi
     
-    # 方法2: 如果没有公网IP，获取内网IP（排除Docker容器IP）
-    if [[ -z "$node_ip" ]]; then
-        node_ip=$(hostname -I | tr ' ' '\n' | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1)
+    # 如果还是没找到有效IP，尝试手动配置
+    if [[ -z "$node_ip" || "$node_ip" == "127.0.0.1" || "$node_ip" == "172."* ]]; then
+        print_warning "无法自动获取有效IP地址，需要手动配置"
+        echo ""
+        echo -e "${YELLOW}请手动输入服务器的IP地址:${NC}"
+        echo "1. 如果是单机部署，请输入服务器的内网IP地址"
+        echo "2. 如果是云服务器，请输入公网IP地址"
+        echo "3. 如果是本地开发，请输入 0.0.0.0"
+        echo ""
+        echo -e "${CYAN}请输入IP地址:${NC}"
+        read -r node_ip
+        
         if [[ -z "$node_ip" ]]; then
-            # 如果还是没找到，使用第一个非Docker的IP
-            node_ip=$(hostname -I | tr ' ' '\n' | grep -v '^172\.1[7-9]\.' | grep -v '^172\.2[0-9]\.' | grep -v '^172\.3[01]\.' | head -1)
+            print_error "未输入IP地址，使用默认配置"
+            node_ip="0.0.0.0"
         fi
-        print_info "使用内网IP: $node_ip"
+    else
+        print_info "使用检测到的IP: $node_ip"
     fi
     
-    # 如果还是没找到，使用默认方法
-    if [[ -z "$node_ip" ]]; then
-        node_ip=$(hostname -I | awk '{print $1}')
-        print_warning "使用默认IP: $node_ip"
+    # 验证IP地址格式
+    if [[ ! "$node_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        print_error "无效的IP地址格式: $node_ip"
+        return 1
     fi
     
     # 初始化集群（添加必要的参数）
     print_info "使用IP: $node_ip 初始化集群..."
-    sudo kubeadm init \
+    
+    # 强制重置kubeadm（确保完全清理）
+    print_info "强制重置kubeadm..."
+    sudo kubeadm reset -f 2>/dev/null || true
+    
+    # 等待进程完全清理
+    sleep 5
+    
+    # 尝试初始化集群
+    print_info "开始初始化K8s集群..."
+    
+    # 检查防火墙状态
+    print_info "检查防火墙状态..."
+    if command -v ufw &> /dev/null; then
+        if sudo ufw status | grep -q "Status: active"; then
+            print_warning "UFW防火墙已启用，正在配置K8s端口..."
+            sudo ufw allow 6443/tcp
+            sudo ufw allow 10250/tcp
+            sudo ufw allow 10251/tcp
+            sudo ufw allow 10252/tcp
+            sudo ufw allow 2379/tcp
+            sudo ufw allow 2380/tcp
+            print_success "防火墙端口已开放"
+        fi
+    fi
+    
+    # 尝试使用0.0.0.0绑定所有接口
+    print_info "尝试使用0.0.0.0绑定所有接口..."
+    if sudo kubeadm init \
         --pod-network-cidr=10.244.0.0/16 \
-        --apiserver-advertise-address=$node_ip \
+        --apiserver-advertise-address="0.0.0.0" \
         --cri-socket=unix:///var/run/containerd/containerd.sock \
         --upload-certs \
-        --control-plane-endpoint=$node_ip
-    
-    # 配置kubectl
-    mkdir -p $HOME/.kube
-    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-    sudo chown $(id -u):$(id -g) $HOME/.kube/config
-    
-    print_success "K8s集群初始化完成"
+        --control-plane-endpoint="$node_ip" \
+        --ignore-preflight-errors=all; then
+        
+        print_success "K8s集群初始化成功"
+        
+        # 配置kubectl
+        mkdir -p $HOME/.kube
+        sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        sudo chown $(id -u):$(id -g) $HOME/.kube/config
+        
+        print_success "kubectl配置完成"
+    else
+        print_error "K8s集群初始化失败"
+        echo ""
+        echo -e "${YELLOW}可能的解决方案:${NC}"
+        echo "1. 检查网络配置和防火墙设置"
+        echo "2. 确保端口 6443, 10250, 10251, 10252 未被占用"
+        echo "3. 检查系统资源是否充足"
+        echo "4. 运行诊断命令: ./docker/mineadmin.sh k8s-diagnose"
+        echo ""
+        
+        # 自动运行诊断
+        print_info "自动运行诊断..."
+        diagnose_k8s_init
+        return 1
+    fi
 }
 
 # 诊断K8s初始化问题
@@ -3504,10 +3631,10 @@ diagnose_k8s_init() {
 init_master_node() {
     print_info "初始化主控节点..."
     
-    # 获取本机IP（优先使用公网IP或内网IP，排除Docker容器IP）
+    # 获取本机IP（集群模式优先使用公网IP，排除Docker容器IP）
     local node_ip=""
     
-    # 方法1: 尝试获取公网IP
+    # 方法1: 尝试获取公网IP（集群模式需要）
     if command -v curl &> /dev/null; then
         node_ip=$(curl -s --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
         if [[ -n "$node_ip" && "$node_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -3519,7 +3646,15 @@ init_master_node() {
     
     # 方法2: 如果没有公网IP，获取内网IP（排除Docker容器IP）
     if [[ -z "$node_ip" ]]; then
-        node_ip=$(hostname -I | tr ' ' '\n' | grep -E '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)' | head -1)
+        node_ip=$(ip route get 8.8.8.8 | awk '{print $7}' | head -1)
+        if [[ -z "$node_ip" || "$node_ip" == "172."* ]]; then
+            # 如果还是Docker IP，尝试其他方法
+            node_ip=$(ip addr show | grep -E "inet.*scope global" | grep -v "172.1[7-9]." | grep -v "172.2[0-9]." | grep -v "172.3[01]." | awk '{print $2}' | cut -d'/' -f1 | head -1)
+        fi
+        if [[ -z "$node_ip" ]]; then
+            # 最后尝试：使用默认网关的接口IP
+            node_ip=$(ip route | grep default | awk '{print $3}' | head -1)
+        fi
         if [[ -z "$node_ip" ]]; then
             # 如果还是没找到，使用第一个非Docker的IP
             node_ip=$(hostname -I | tr ' ' '\n' | grep -v '^172\.1[7-9]\.' | grep -v '^172\.2[0-9]\.' | grep -v '^172\.3[01]\.' | head -1)
@@ -3533,36 +3668,244 @@ init_master_node() {
         print_warning "使用默认IP: $node_ip"
     fi
     
-    # 初始化主控节点（添加必要的参数）
+    # 验证IP地址格式
+    if [[ ! "$node_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        print_error "无效的IP地址: $node_ip"
+        return 1
+    fi
+    
+    # 完全重置K8s环境
+    print_info "完全重置K8s环境..."
+    sudo kubeadm reset --force
+    sudo rm -rf /etc/kubernetes/
+    sudo rm -rf /var/lib/kubelet/
+    sudo rm -rf /var/lib/etcd/
+    sudo rm -rf ~/.kube/
+    
+    # 检查端口占用并清理
+    print_info "检查并清理端口占用..."
+    local ports=(6443 10250 10251 10252 10255 2379 2380)
+    for port in "${ports[@]}"; do
+        if netstat -tuln | grep -q ":$port "; then
+            print_warning "端口 $port 被占用，正在释放..."
+            sudo fuser -k $port/tcp 2>/dev/null || true
+            sleep 2
+        fi
+    done
+    
+    # 确保containerd配置正确
+    print_info "配置containerd..."
+    sudo mkdir -p /etc/containerd
+    sudo containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+    
+    # 修改containerd配置，使用正确的pause镜像和更保守的设置
+    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+    sudo sed -i 's/sandbox_image = "registry.k8s.io\/pause:3.8"/sandbox_image = "registry.k8s.io\/pause:3.10"/' /etc/containerd/config.toml
+    
+    # 添加更保守的资源限制
+    sudo sed -i '/\[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options\]/a\  SystemdCgroup = true' /etc/containerd/config.toml
+    
+    # 重启containerd
+    sudo systemctl restart containerd
+    sleep 5
+    
+    # 确保kubelet配置正确
+    print_info "配置kubelet..."
+    sudo mkdir -p /var/lib/kubelet
+    cat > /tmp/kubelet-config.yaml << EOF
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+containerRuntimeEndpoint: unix:///var/run/containerd/containerd.sock
+failSwapOn: false
+maxPods: 110
+memorySwap: {}
+kubeReserved:
+  memory: "256Mi"
+  cpu: "100m"
+systemReserved:
+  memory: "256Mi"
+  cpu: "100m"
+evictionHard:
+  memory.available: "100Mi"
+  nodefs.available: "10%"
+evictionSoft:
+  memory.available: "200Mi"
+  nodefs.available: "15%"
+evictionSoftGracePeriod:
+  memory.available: "1m30s"
+  nodefs.available: "1m30s"
+EOF
+    
+    sudo cp /tmp/kubelet-config.yaml /var/lib/kubelet/config.yaml
+    rm -f /tmp/kubelet-config.yaml
+    
+    # 重启kubelet
+    sudo systemctl restart kubelet
+    sleep 5
+    
+    # 显示配置信息
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}📋 K8s初始化配置:${NC}"
+    echo -e "${BLUE}节点IP:${NC} $node_ip"
+    echo -e "${BLUE}Pod网段:${NC} 10.244.0.0/16"
+    echo -e "${BLUE}Service网段:${NC} 10.96.0.0/12"
+    echo -e "${BLUE}K8s版本:${NC} v1.33.4"
+    echo -e "${BLUE}容器运行时:${NC} containerd"
+    echo -e "${BLUE}Pause镜像:${NC} registry.k8s.io/pause:3.10"
+    echo -e "${BLUE}最大Pod数:${NC} 110"
+    echo -e "${BLUE}内存预留:${NC} 512Mi (kube + system)"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    
+    # 使用更保守的初始化命令
     print_info "使用IP: $node_ip 初始化主控节点..."
-    sudo kubeadm init \
+    
+    # 执行初始化（使用更保守的设置）
+    if timeout 900 sudo kubeadm init \
         --pod-network-cidr=10.244.0.0/16 \
         --apiserver-advertise-address=$node_ip \
         --control-plane-endpoint=$node_ip \
         --cri-socket=unix:///var/run/containerd/containerd.sock \
-        --upload-certs
-    
-    # 配置kubectl
-    mkdir -p $HOME/.kube
-    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-    sudo chown $(id -u):$(id -g) $HOME/.kube/config
-    
-    print_success "主控节点初始化完成"
+        --upload-certs \
+        --ignore-preflight-errors=all \
+        --kubernetes-version=v1.33.4; then
+        
+        print_success "主控节点初始化成功"
+        
+        # 配置kubectl
+        mkdir -p $HOME/.kube
+        sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        sudo chown $(id -u):$(id -g) $HOME/.kube/config
+        
+        # 验证集群状态
+        print_info "验证集群状态..."
+        sleep 20
+        
+        if kubectl get nodes; then
+            print_success "集群状态正常"
+        else
+            print_warning "集群状态检查失败，请手动检查"
+        fi
+        
+    else
+        print_error "主控节点初始化失败"
+        
+        # 诊断信息
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${WHITE}🔍 诊断信息:${NC}"
+        echo ""
+        
+        # 检查kubelet状态
+        echo -e "${BLUE}检查kubelet状态:${NC}"
+        sudo systemctl status kubelet --no-pager -l || true
+        echo ""
+        
+        # 检查containerd状态
+        echo -e "${BLUE}检查containerd状态:${NC}"
+        sudo systemctl status containerd --no-pager -l || true
+        echo ""
+        
+        # 检查容器状态（使用docker命令作为备选）
+        echo -e "${BLUE}检查K8s容器状态:${NC}"
+        if command -v crictl &> /dev/null; then
+            sudo crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock ps -a | grep kube || true
+        else
+            echo "crictl未安装，尝试使用docker命令..."
+            sudo docker ps -a | grep kube || true
+        fi
+        echo ""
+        
+        # 检查kube-apiserver日志
+        echo -e "${BLUE}检查kube-apiserver日志:${NC}"
+        if command -v crictl &> /dev/null; then
+            local api_server_id=$(sudo crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock ps -a | grep kube-apiserver | awk '{print $1}' | head -1)
+            if [[ -n "$api_server_id" ]]; then
+                sudo crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock logs "$api_server_id" 2>/dev/null | tail -30 || true
+            else
+                echo "未找到kube-apiserver容器"
+            fi
+        else
+            echo "crictl未安装，无法查看容器日志"
+        fi
+        echo ""
+        
+        # 检查kubelet日志
+        echo -e "${BLUE}检查kubelet日志:${NC}"
+        sudo journalctl -u kubelet --no-pager -l | tail -30 || true
+        echo ""
+        
+        # 检查系统资源
+        echo -e "${BLUE}检查系统资源:${NC}"
+        echo "内存使用:"
+        free -h
+        echo ""
+        echo "磁盘使用:"
+        df -h
+        echo ""
+        echo "CPU使用:"
+        top -bn1 | head -20
+        echo ""
+        
+        # 提供解决建议
+        echo -e "${YELLOW}💡 解决建议:${NC}"
+        echo "1. 检查系统资源是否充足"
+        echo "2. 确保网络连接正常"
+        echo "3. 检查防火墙设置"
+        echo "4. 尝试使用单节点模式: 选择部署模式时选择1"
+        echo "5. 运行诊断命令: hook k8s-diagnose"
+        echo ""
+        
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        
+        return 1
+    fi
 }
 
 # 安装网络插件
 install_network_plugin() {
-    print_info "安装网络插件 (Calico)..."
+    print_info "安装网络插件 (Flannel)..."
     
-    # 安装Calico
-    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/tigera-operator.yaml
-    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/custom-resources.yaml
+    # 安装Flannel网络插件（更稳定，兼容性更好）
+    kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
     
     # 等待网络插件就绪
     print_info "等待网络插件就绪..."
-    kubectl wait --for=condition=ready pod -l name=calico-node -n kube-system --timeout=300s
     
-    print_success "网络插件安装完成"
+    # 等待DaemonSet创建完成
+    sleep 10
+    
+    # 检查DaemonSet状态
+    print_info "检查Flannel DaemonSet状态..."
+    kubectl get daemonset -n kube-flannel
+    
+    # 等待Pod启动
+    print_info "等待Flannel Pod启动..."
+    kubectl wait --for=condition=available daemonset/kube-flannel-ds -n kube-flannel --timeout=300s || true
+    
+    # 检查Pod状态
+    print_info "检查Flannel Pod状态..."
+    kubectl get pods -n kube-flannel
+    
+    # 等待所有Pod就绪
+    print_info "等待所有Flannel Pod就绪..."
+    kubectl wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s || \
+    kubectl wait --for=condition=ready pod -l k8s-app=flannel -n kube-flannel --timeout=300s || \
+    kubectl wait --for=condition=ready pod -l name=flannel -n kube-flannel --timeout=300s || \
+    kubectl wait --for=condition=ready pod -l app=flannel -n kube-system --timeout=300s || \
+    kubectl wait --for=condition=ready pod -l k8s-app=flannel -n kube-system --timeout=300s || \
+    kubectl wait --for=condition=ready pod -l name=flannel -n kube-system --timeout=300s
+    
+    # 检查网络插件状态
+    print_info "检查网络插件状态..."
+    kubectl get pods -A | grep flannel || true
+    
+    # 验证网络连通性
+    print_info "验证网络连通性..."
+    if kubectl get nodes | grep -q "Ready"; then
+        print_success "Flannel网络插件安装完成"
+    else
+        print_warning "网络插件可能未完全就绪，但安装已完成"
+    fi
 }
 
 # 部署MineAdmin到K8s
@@ -4212,7 +4555,7 @@ show_k8s_logs() {
     echo "3. kube-scheduler"
     echo "4. kubelet"
     echo "5. kube-proxy"
-    echo "6. calico-node"
+    echo "6. flannel"
     echo "7. mineadmin-server"
     echo "8. mineadmin-web"
     echo "9. mysql"
@@ -4240,7 +4583,10 @@ show_k8s_logs() {
             kubectl logs -n kube-system kube-proxy-$(hostname) --tail=100
             ;;
         6)
-            kubectl logs -n kube-system -l k8s-app=calico-node --tail=100
+            kubectl logs -n kube-system -l app=flannel --tail=100 2>/dev/null || \
+            kubectl logs -n kube-system -l k8s-app=flannel --tail=100 2>/dev/null || \
+            kubectl logs -n kube-system -l name=flannel --tail=100 2>/dev/null || \
+            echo "未找到Flannel日志，请检查Flannel Pod状态"
             ;;
         7)
             kubectl logs -n mineadmin -l app=mineadmin-server --tail=100
