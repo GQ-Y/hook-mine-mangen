@@ -750,13 +750,13 @@ install_mineadmin() {
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${WHITE}🎯 访问信息:${NC}"
         echo "后端API: http://localhost:9501"
-        echo "前端生产: http://localhost:80"
+        echo "前端生产: http://localhost:10000"
         echo ""
         echo -e "${WHITE}📡 监听端口:${NC}"
         echo "9501 - 后端API服务"
         echo "9502 - WebSocket服务"
         echo "9509 - 通知服务"
-        echo "80   - 前端生产服务"
+        echo "10000   - 前端生产服务"
         echo "3306 - MySQL数据库"
         echo "6379 - Redis缓存"
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1276,7 +1276,7 @@ TZ=Asia/Shanghai
 SERVER_PORT=9501
 SERVER_HTTP_PORT=9502
 SERVER_GRPC_PORT=9509
-WEB_PORT=80
+WEB_PORT=10000
 EOF
 }
 
