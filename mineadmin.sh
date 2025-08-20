@@ -676,11 +676,6 @@ check_system_compatibility() {
 install_mineadmin() {
     print_info "开始安装 MineAdmin..."
     
-    # 检查是否为root用户
-    if [[ $EUID -eq 0 ]]; then
-        print_error "请不要使用root用户运行此脚本"
-        return 1
-    fi
     
     # 检查Docker是否安装
     if ! command -v docker &> /dev/null; then
@@ -1517,11 +1512,7 @@ show_config_info() {
 build_frontend() {
     print_info "开始前端构建..."
     
-    # 检查是否为root用户
-    if [[ $EUID -eq 0 ]]; then
-        print_error "请不要使用root用户运行此脚本"
-        return 1
-    fi
+
     
     cd "$PROJECT_ROOT"
     
@@ -1845,11 +1836,6 @@ init_mineadmin_project() {
     echo -e "${WHITE}🚀 MineAdmin 项目初始化${NC}"
     echo ""
     
-    # 检查是否为root用户
-    if [[ $EUID -eq 0 ]]; then
-        print_error "请不要使用root用户运行此脚本"
-        return 1
-    fi
     
     # 第一步：检查Git是否安装
     echo -e "${BLUE}[1/5] 正在检测本机环境...${NC}"
@@ -2018,11 +2004,6 @@ init_hook_project() {
     echo -e "${WHITE}🚀 Hook项目初始化${NC}"
     echo ""
     
-    # 检查是否为root用户
-    if [[ $EUID -eq 0 ]]; then
-        print_error "请不要使用root用户运行此脚本"
-        return 1
-    fi
     
     # 第一步：检查Git是否安装
     echo -e "${BLUE}[1/6] 正在检测本机环境...${NC}"
@@ -3270,11 +3251,6 @@ check_k8s_compatibility() {
 deploy_k8s_cluster() {
     print_info "开始部署K8s集群..."
     
-    # 检查是否为root用户
-    if [[ $EUID -eq 0 ]]; then
-        print_error "请不要使用root用户运行此脚本"
-        return 1
-    fi
     
     # 检查系统兼容性
     echo -e "${BLUE}[1/8] 检查系统兼容性...${NC}"
@@ -5671,11 +5647,6 @@ handle_hook_command() {
 
 # 主函数
 main() {
-    # 检查是否为root用户
-    if [[ $EUID -eq 0 ]]; then
-        print_error "请不要使用root用户运行此脚本"
-        exit 1
-    fi
     
     # 检查项目路径
     if [ ! -d "$PROJECT_ROOT" ]; then
