@@ -116,7 +116,7 @@ INIT_SUCCESS=true
 
 # 运行数据库迁移
 echo "🔄 运行数据库迁移..."
-if swoole-cli bin/hyperf.php migrate --force; then
+if yes | swoole-cli bin/hyperf.php migrate --force; then
     echo "✅ 数据库迁移执行成功"
 else
     echo "❌ 数据库迁移执行失败"
@@ -125,7 +125,7 @@ fi
 
 # 运行数据库填充
 echo "🔄 运行数据库填充..."
-if swoole-cli bin/hyperf.php db:seed; then
+if yes | swoole-cli bin/hyperf.php db:seed; then
     echo "✅ 数据库填充执行成功"
 else
     echo "❌ 数据库填充执行失败"
