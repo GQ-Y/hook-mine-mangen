@@ -51,6 +51,8 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     supervisor \
     nginx \
+    mysql-client \
+    redis-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建必要的目录（在根目录下）

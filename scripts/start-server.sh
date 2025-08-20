@@ -81,25 +81,102 @@ while ! nc -z redis 6379; do
 done
 echo "✅ Redis服务已就绪"
 
-# 检查数据库连接
-echo "🔍 检查数据库连接..."
-# 使用简单的数据库连接测试
-swoole-cli bin/hyperf.php db:seed || {
-    echo "⚠️  数据库连接测试失败，但继续启动服务"
-}
-echo "✅ 数据库连接检查完成"
+# 使用mysql命令测试数据库连接
+echo "🔍 测试MySQL数据库连接..."
+if mysql -h mysql -P 3306 -u root -p${DB_PASSWORD} -e "SELECT 1;" > /dev/null 2>&1; then
+    echo "✅ MySQL数据库连接测试成功"
+else
+    echo "❌ MySQL数据库连接测试失败"
+    exit 1
+fi
+
+# 使用redis-cli测试Redis连接
+echo "🔍 测试Redis连接..."
+if redis-cli -h redis -p 6379 -a ${REDIS_AUTH} ping > /dev/null 2>&1; then
+    echo "✅ Redis连接测试成功"
+else
+    echo "❌ Redis连接测试失败"
+    exit 1
+fi
+
+# 检查初始化锁文件
+echo "🔍 检查初始化锁文件..."
+if [ -f /app/runtime/init.lock ]; then
+    echo "✅ 初始化锁文件已存在，跳过数据库迁移和填充"
+    echo "🚀 直接启动 MineAdmin 服务..."
+    echo "📊 服务端口: 9501 (HTTP), 9502 (WebSocket), 9509 (Notification)"
+    echo "=========================================="
+    exec swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php start
+fi
+
+echo "🔄 初始化锁文件不存在，开始执行数据库初始化..."
+
+# 初始化状态标志
+INIT_SUCCESS=true
 
 # 运行数据库迁移
 echo "🔄 运行数据库迁移..."
-swoole-cli bin/hyperf.php migrate --force || {
-    echo "⚠️  数据库迁移失败，但继续启动服务"
-}
+if swoole-cli bin/hyperf.php migrate --force; then
+    echo "✅ 数据库迁移执行成功"
+else
+    echo "❌ 数据库迁移执行失败"
+    INIT_SUCCESS=false
+fi
 
+# 运行数据库填充
+echo "🔄 运行数据库填充..."
+if swoole-cli bin/hyperf.php db:seed; then
+    echo "✅ 数据库填充执行成功"
+else
+    echo "❌ 数据库填充执行失败"
+    INIT_SUCCESS=false
+fi
+
+# 只有在所有初始化步骤都成功时才创建锁文件
+if [ "$INIT_SUCCESS" = true ]; then
+    echo "🔒 所有初始化步骤成功，创建初始化锁文件..."
+    mkdir -p /app/runtime
+    touch /app/runtime/init.lock
+    echo "✅ 初始化锁文件创建成功"
+else
+    echo "❌ 数据库初始化失败，不创建锁文件"
+    echo "⚠️  请检查数据库配置和迁移文件，然后重新启动服务"
+    exit 1
+fi
 
 # 启动服务
 echo "🚀 启动 MineAdmin 服务..."
 echo "📊 服务端口: 9501 (HTTP), 9502 (WebSocket), 9509 (Notification)"
 echo "=========================================="
 
-# 使用 swoole-cli 启动服务，禁用短函数名
-exec swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php start
+# 使用 nohup 启动服务，确保常驻后台运行
+echo "🔄 启动 MineAdmin 服务进程..."
+nohup swoole-cli -d swoole.use_shortname='Off' bin/hyperf.php start > /app/logs/hyperf.log 2>&1 &
+
+# 获取进程ID
+SERVER_PID=$!
+echo "✅ 服务进程已启动，PID: $SERVER_PID"
+
+# 等待服务启动
+echo "⏳ 等待服务启动..."
+sleep 5
+
+# 检查服务是否正常运行
+if ps -p $SERVER_PID > /dev/null; then
+    echo "✅ MineAdmin 服务启动成功，正在后台运行"
+    echo "📊 服务端口: 9501 (HTTP), 9502 (WebSocket), 9509 (Notification)"
+    echo "📝 日志文件: /app/logs/hyperf.log"
+    echo "=========================================="
+    
+    # 保持容器运行，监控服务进程
+    while ps -p $SERVER_PID > /dev/null; do
+        sleep 10
+    done
+    
+    echo "❌ 服务进程已停止"
+    exit 1
+else
+    echo "❌ 服务启动失败"
+    echo "📝 查看日志: tail -f /app/logs/hyperf.log"
+    exit 1
+fi
